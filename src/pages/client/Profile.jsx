@@ -1,10 +1,13 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import ClientLayout from '../../components/layouts/ClientLayout';
 import { Button, Input } from '../../components/common';
+import AddressModal from '../../components/common/AddressModal';
 import toast from 'react-hot-toast';
+
+const DEFAULT_COORDS = { latitude: 8.9167, longitude: -75.1833 };
 
 const Profile = () => {
   const { user, profile, signOut } = useAuth();
@@ -16,12 +19,6 @@ const Profile = () => {
   const [addresses, setAddresses] = useState([]);
   const [showAddressModal, setShowAddressModal] = useState(false);
   const [editingAddress, setEditingAddress] = useState(null);
-  const [addressForm, setAddressForm] = useState({
-    address_name: '',
-    address_line: '',
-    instructions: '',
-    is_default: false,
-  });
   const [loading, setLoading] = useState(false);
   const [addrLoading, setAddrLoading] = useState(false);
 
@@ -67,7 +64,7 @@ const Profile = () => {
         .from('profiles')
         .update({
           full_name: formData.full_name,
-          phone: formData.phone
+          phone: formData.phone,
         })
         .eq('id', user.id);
 
@@ -82,54 +79,45 @@ const Profile = () => {
     }
   };
 
-  const handleAddressSubmit = async (e) => {
-    e.preventDefault();
+  const handleSaveAddress = async (data, addressId) => {
     setAddrLoading(true);
 
     try {
-      if (editingAddress) {
-        // If setting as default, unset others first
-        if (addressForm.is_default) {
-          await supabase
-            .from('client_addresses')
-            .update({ is_default: false })
-            .eq('client_id', user.id);
-        }
+      const payload = {
+        address_name: data.address_name,
+        address_line: data.address_line,
+        instructions: data.instructions,
+        is_default: data.is_default || addresses.length === 0,
+        latitude: data.latitude ?? DEFAULT_COORDS.latitude,
+        longitude: data.longitude ?? DEFAULT_COORDS.longitude,
+        client_id: user.id,
+      };
 
-        const { error } = await supabase
+      if (payload.is_default) {
+        await supabase
           .from('client_addresses')
-          .update(addressForm)
-          .eq('id', editingAddress.id);
-
-        if (error) throw error;
-        toast.success('Dirección actualizada');
-      } else {
-        // If first address or setting as default, unset others
-        if (addressForm.is_default || addresses.length === 0) {
-          await supabase
-            .from('client_addresses')
-            .update({ is_default: false })
-            .eq('client_id', user.id);
-          addressForm.is_default = true;
-        }
-
-        const { error } = await supabase
-          .from('client_addresses')
-          .insert([{ ...addressForm, client_id: user.id }]);
-
-        if (error) throw error;
-        toast.success('Dirección agregada');
+          .update({ is_default: false })
+          .eq('client_id', user.id);
       }
 
+      let error;
+      if (addressId) {
+        ({ error } = await supabase
+          .from('client_addresses')
+          .update(payload)
+          .eq('id', addressId));
+      } else {
+        ({ error } = await supabase
+          .from('client_addresses')
+          .insert([payload]));
+      }
+
+      if (error) throw error;
+
+      toast.success(addressId ? 'Dirección actualizada' : 'Dirección agregada');
       setShowAddressModal(false);
       setEditingAddress(null);
-      setAddressForm({
-        address_name: '',
-        address_line: '',
-        instructions: '',
-        is_default: false,
-      });
-      fetchAddresses();
+      await fetchAddresses();
     } catch (error) {
       console.error('Error saving address:', error);
       toast.error('Error al guardar la dirección');
@@ -159,13 +147,11 @@ const Profile = () => {
   const setAsDefault = async (address) => {
     try {
       setAddrLoading(true);
-      // Unset all
       await supabase
         .from('client_addresses')
         .update({ is_default: false })
         .eq('client_id', user.id);
 
-      // Set new default
       const { error } = await supabase
         .from('client_addresses')
         .update({ is_default: true })
@@ -292,7 +278,6 @@ const Profile = () => {
                   size="sm"
                   onClick={() => {
                     setEditingAddress(null);
-                    setAddressForm({ address_name: '', address_line: '', instructions: '', is_default: false });
                     setShowAddressModal(true);
                   }}
                 >
@@ -328,18 +313,12 @@ const Profile = () => {
                               className="p-2 text-gray-400 hover:text-orange-600 transition-colors"
                               title="Marcar como predeterminada"
                             >
-                              ⭐
+                              ★
                             </button>
                           )}
                           <button
                             onClick={() => {
                               setEditingAddress(addr);
-                              setAddressForm({
-                                address_name: addr.address_name,
-                                address_line: addr.address_line,
-                                instructions: addr.instructions || '',
-                                is_default: addr.is_default
-                              });
                               setShowAddressModal(true);
                             }}
                             className="p-2 text-gray-400 hover:text-blue-600 transition-colors"
@@ -368,7 +347,6 @@ const Profile = () => {
 
           {/* Quick Actions Sidebar */}
           <div className="space-y-6">
-            {/* Stats Card */}
             <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-3xl p-6 border border-blue-100">
               <h3 className="text-lg font-bold text-gray-900 mb-4">Tus estadísticas</h3>
               <div className="space-y-3">
@@ -387,7 +365,6 @@ const Profile = () => {
               </div>
             </div>
 
-            {/* Quick Actions */}
             <div className="bg-white rounded-3xl shadow-sm p-6 border border-gray-100">
               <h3 className="text-lg font-bold text-gray-900 mb-4">Acciones rápidas</h3>
               <div className="space-y-2">
@@ -432,7 +409,6 @@ const Profile = () => {
               </div>
             </div>
 
-            {/* Logout Button */}
             <button
               onClick={handleSignOut}
               className="w-full flex items-center justify-center space-x-3 p-4 rounded-2xl bg-red-50 hover:bg-red-100 transition-colors group border border-red-200/50"
@@ -446,71 +422,15 @@ const Profile = () => {
         </div>
       </div>
 
-      {/* Address Modal */}
-      {showAddressModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl w-full max-w-md p-8 shadow-2xl">
-            <h3 className="text-2xl font-bold text-gray-900 mb-6">
-              {editingAddress ? 'Editar dirección' : 'Nueva dirección'}
-            </h3>
-            <form onSubmit={handleAddressSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Etiqueta (Ej: Casa, Trabajo)</label>
-                <Input
-                  required
-                  value={addressForm.address_name}
-                  onChange={(e) => setAddressForm({ ...addressForm, address_name: e.target.value })}
-                  placeholder="Ej: Mi Casa"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Dirección completa</label>
-                <Input
-                  required
-                  value={addressForm.address_line}
-                  onChange={(e) => setAddressForm({ ...addressForm, address_line: e.target.value })}
-                  placeholder="Calle 123 #45-67"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Instrucciones (Opcional)</label>
-                <Input
-                  value={addressForm.instructions}
-                  onChange={(e) => setAddressForm({ ...addressForm, instructions: e.target.value })}
-                  placeholder="Apto 502, dejar en portería..."
-                />
-              </div>
-              <div className="flex items-center space-x-2 py-2">
-                <input
-                  type="checkbox"
-                  id="is_default"
-                  checked={addressForm.is_default}
-                  onChange={(e) => setAddressForm({ ...addressForm, is_default: e.target.checked })}
-                  className="w-5 h-5 rounded text-orange-500 focus:ring-orange-500"
-                />
-                <label htmlFor="is_default" className="text-sm text-gray-700">Marcar como predeterminada</label>
-              </div>
-              <div className="flex space-x-3 pt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="flex-1"
-                  onClick={() => setShowAddressModal(false)}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  type="submit"
-                  className="flex-1"
-                  loading={addrLoading}
-                >
-                  Guardar
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <AddressModal
+        isOpen={showAddressModal}
+        onClose={() => {
+          setShowAddressModal(false);
+          setEditingAddress(null);
+        }}
+        onSave={handleSaveAddress}
+        editingAddress={editingAddress}
+      />
     </ClientLayout>
   );
 };

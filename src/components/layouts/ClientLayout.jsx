@@ -1,8 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import useCart from '../../hooks/useCart';
 import { useAuth } from '../../contexts/AuthContext';
 import ActiveMandadosModal from '../orders/ActiveMandadosModal';
+import { supabase } from '../../lib/supabase';
+import AddressModal from '../common/AddressModal';
+import toast from 'react-hot-toast';
+
+const DEFAULT_COORDS = { latitude: 8.9167, longitude: -75.1833 };
 
 const ClientLayout = ({ children }) => {
   const location = useLocation();
@@ -12,6 +17,10 @@ const ClientLayout = ({ children }) => {
   const [showMandadosModal, setShowMandadosModal] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [addresses, setAddresses] = useState([]);
+  const [addressLoading, setAddressLoading] = useState(false);
+  const [addressModalOpen, setAddressModalOpen] = useState(false);
+  const [editingAddress, setEditingAddress] = useState(null);
   const userMenuRef = useRef(null);
 
   const cartItemsCount = getTotalItems();
@@ -32,6 +41,90 @@ const ClientLayout = ({ children }) => {
     };
   }, [showUserMenu]);
 
+  const fetchAddresses = async () => {
+    if (!user) return;
+    try {
+      setAddressLoading(true);
+      const { data, error } = await supabase
+        .from('client_addresses')
+        .select('*')
+        .eq('client_id', user.id)
+        .order('is_default', { ascending: false });
+
+      if (error) throw error;
+      setAddresses(data || []);
+    } catch (error) {
+      console.error('[ClientLayout] Error fetching addresses:', error);
+    } finally {
+      setAddressLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!user) return;
+    fetchAddresses();
+
+    const channel = supabase
+      .channel('client-addresses')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'client_addresses', filter: `client_id=eq.${user.id}` },
+        () => fetchAddresses()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
+
+  const handleSaveAddress = async (data, addressId) => {
+    setAddressLoading(true);
+
+    try {
+      const payload = {
+        address_name: data.address_name,
+        address_line: data.address_line,
+        instructions: data.instructions,
+        is_default: data.is_default || addresses.length === 0,
+        latitude: data.latitude ?? DEFAULT_COORDS.latitude,
+        longitude: data.longitude ?? DEFAULT_COORDS.longitude,
+        client_id: user.id,
+      };
+
+      if (payload.is_default) {
+        await supabase
+          .from('client_addresses')
+          .update({ is_default: false })
+          .eq('client_id', user.id);
+      }
+
+      let error;
+      if (addressId) {
+        ({ error } = await supabase
+          .from('client_addresses')
+          .update(payload)
+          .eq('id', addressId));
+      } else {
+        ({ error } = await supabase
+          .from('client_addresses')
+          .insert([payload]));
+      }
+
+      if (error) throw error;
+
+      toast.success(addressId ? 'Direccion actualizada' : 'Direccion guardada');
+      setAddressModalOpen(false);
+      setEditingAddress(null);
+      await fetchAddresses();
+    } catch (error) {
+      console.error('[ClientLayout] Error saving address:', error);
+      toast.error('Error al guardar la direccion');
+    } finally {
+      setAddressLoading(false);
+    }
+  };
+
   const navItems = [
     { path: '/', label: 'Inicio', icon: '🏠' },
     { path: '/stores', label: 'Tiendas', icon: '🏪' },
@@ -48,6 +141,11 @@ const ClientLayout = ({ children }) => {
     await signOut();
     navigate('/auth/login');
   };
+
+  const showLocationBanner =
+    !!user &&
+    !addressLoading &&
+    (addresses.length === 0 || !addresses.some((addr) => addr.is_default));
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -143,7 +241,7 @@ const ClientLayout = ({ children }) => {
                       className="w-full flex items-center space-x-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors text-left"
                     >
                       <span>🚪</span>
-                      <span>Cerrar Sesión</span>
+                      <span>Cerrar Sesion</span>
                     </button>
                   </div>
                 )}
@@ -216,13 +314,36 @@ const ClientLayout = ({ children }) => {
                   className="flex items-center px-4 py-3 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-colors mt-2"
                 >
                   <span className="mr-2">🚪</span>
-                  Cerrar Sesión
+                  Cerrar Sesion
                 </button>
               </nav>
             </div>
           )}
         </div>
       </header>
+
+      {/* Soft prompt for location */}
+      {showLocationBanner && (
+        <div className="sticky top-16 z-40 bg-blue-50 border-b border-blue-100">
+          <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-start gap-3 text-gray-800">
+              <span className="text-xl">📍</span>
+              <p className="text-sm sm:text-base font-medium">
+                Para mostrarte los mejores comercios, necesitamos tu ubicacion.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setEditingAddress(null);
+                setAddressModalOpen(true);
+              }}
+              className="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors"
+            >
+              Configurar ubicacion
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="max-w-screen-2xl mx-auto p-4 sm:p-6 lg:p-10 xl:p-12 min-h-[calc(100vh-4rem)] overflow-x-hidden">
@@ -250,6 +371,16 @@ const ClientLayout = ({ children }) => {
 
       {/* Spacer for mobile bottom nav */}
       <div className="md:hidden h-16" />
+
+      <AddressModal
+        isOpen={addressModalOpen}
+        onClose={() => {
+          setAddressModalOpen(false);
+          setEditingAddress(null);
+        }}
+        onSave={handleSaveAddress}
+        editingAddress={editingAddress}
+      />
     </div>
   );
 };

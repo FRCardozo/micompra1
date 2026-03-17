@@ -1,53 +1,38 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ClientLayout from '../../components/layouts/ClientLayout';
-import { Card, Button, Input, LoadingSpinner } from '../../components/common';
+import { Card, Button, LoadingSpinner } from '../../components/common';
 import { toast } from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
 import useCart from '../../hooks/useCart';
 import { validateCoverage } from '../../lib/coverageHelper';
+import AddressModal from '../../components/common/AddressModal';
 
 const Checkout = () => {
   const navigate = useNavigate();
   const { cartItems, getTotalPrice, clearCart } = useCart();
 
   const [addresses, setAddresses] = useState([]);
-  const [paymentMethods, setPaymentMethods] = useState([]);
   const [selectedAddress, setSelectedAddress] = useState(null);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(null);
-  const [couponCode, setCouponCode] = useState('');
-  const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [notes, setNotes] = useState('');
+  
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [isFirstOrder, setIsFirstOrder] = useState(false);
+  
   const [showAddressModal, setShowAddressModal] = useState(false);
   const [editingAddress, setEditingAddress] = useState(null);
-  const [addressForm, setAddressForm] = useState({
-    address_name: '',
-    address_line: '',
-    instructions: '',
-    is_default: false,
-    // CRÍTICO: Debes agregar esto a tu UI del modal luego
-    latitude: null, 
-    longitude: null
-  });
-  const [addrLoading, setAddrLoading] = useState(false);
 
-  // --- NUEVOS ESTADOS DE LOGÍSTICA ---
   const [zones, setZones] = useState([]);
   const [storeData, setStoreData] = useState(null);
-  const [deliveryTier, setDeliveryTier] = useState(null); // 1, 2, o 3
-  const [deliveryMethod, setDeliveryMethod] = useState(''); // 'express', 'encargo', 'certified'
+  const [deliveryTier, setDeliveryTier] = useState(null); 
+  const [deliveryMethod, setDeliveryMethod] = useState(''); 
   const [coverageMsg, setCoverageMsg] = useState('');
   const [dynamicDeliveryFee, setDynamicDeliveryFee] = useState(0);
 
   const subtotal = getTotalPrice();
-  const discount = appliedCoupon ? (subtotal * appliedCoupon.discount) / 100 : 0;
-  
-  // El costo de envío ahora es dinámico
   const finalDeliveryFee = (isFirstOrder && subtotal >= 5000) ? 0 : dynamicDeliveryFee;
-  const total = subtotal + finalDeliveryFee - discount;
+  const total = subtotal + finalDeliveryFee;
 
   useEffect(() => {
     if (cartItems.length === 0) {
@@ -57,14 +42,9 @@ const Checkout = () => {
     fetchUserDataAndLogistics();
   }, []);
 
-  // --- EVALUADOR DE LOS 3 NIVELES LOGÍSTICOS ---
   useEffect(() => {
     if (selectedAddress && storeData && zones.length > 0) {
-      // NOTA: Si la dirección no tiene lat/lng en BD, usamos el centro de Galeras como fallback temporal
-      const clientLat = selectedAddress.latitude || 8.9167;
-      const clientLng = selectedAddress.longitude || -75.1833;
-      
-      const clientLoc = { lat: clientLat, lng: clientLng };
+      const clientLoc = { lat: selectedAddress.latitude || 8.9167, lng: selectedAddress.longitude || -75.1833 };
       const storeLoc = { lat: storeData.latitude || 8.9167, lng: storeData.longitude || -75.1833 };
 
       const clientCoverage = validateCoverage(clientLoc, zones);
@@ -72,23 +52,20 @@ const Checkout = () => {
 
       if (clientCoverage.available) {
         if (storeCoverage.available && clientCoverage.zone.id === storeCoverage.zone.id) {
-          // NIVEL 1: Mismo polígono (Local)
           setDeliveryTier(1);
           setDeliveryMethod('express');
           setDynamicDeliveryFee(clientCoverage.zone.base_delivery_cost || 2000);
           setCoverageMsg('Envío Local Express');
         } else {
-          // NIVEL 2: Polígonos distintos (Intermunicipal)
           setDeliveryTier(2);
-          setDeliveryMethod('encargo'); // Opción por defecto, el usuario puede cambiarla a 'certified'
-          setDynamicDeliveryFee(0); // A convenir
+          setDeliveryMethod('encargo'); 
+          setDynamicDeliveryFee(0);
           setCoverageMsg('Envío Intermunicipal disponible');
         }
       } else {
-        // NIVEL 3: Cliente fuera de mapa (Nacional)
         setDeliveryTier(3);
         setDeliveryMethod('certified');
-        setDynamicDeliveryFee(0); // Flete contra entrega
+        setDynamicDeliveryFee(0);
         setCoverageMsg('Fuera de zona express. Solo Mensajería Certificada.');
       }
     }
@@ -98,13 +75,11 @@ const Checkout = () => {
     try {
       setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
-
       if (!user) {
         navigate('/auth/login');
         return;
       }
 
-      // 1. Fetch Addresses
       const { data: addressData } = await supabase
         .from('client_addresses')
         .select('*')
@@ -116,23 +91,17 @@ const Checkout = () => {
         setSelectedAddress(addressData.find(a => a.is_default) || addressData[0]);
       }
 
-      // 2. Fetch Store Location (Crítico para calcular rutas)
       const storeId = cartItems[0].store_id;
       const { data: sData } = await supabase
         .from('stores')
-        .select('id, latitude, longitude')
+        .select('id, name, latitude, longitude, phone')
         .eq('id', storeId)
         .single();
       setStoreData(sData);
 
-      // 3. Fetch Coverage Zones activas
-      const { data: zData } = await supabase
-        .from('coverage_zones')
-        .select('*')
-        .eq('is_active', true);
+      const { data: zData } = await supabase.from('coverage_zones').select('*').eq('is_active', true);
       setZones(zData || []);
 
-      // 4. Check First Order
       const { count: orderCount } = await supabase
         .from('orders')
         .select('*', { count: 'exact', head: true })
@@ -146,72 +115,44 @@ const Checkout = () => {
     }
   };
 
-  const handleSaveAddress = async (e) => {
-    e.preventDefault();
-    setAddrLoading(true);
+  const handleSaveAddressFromModal = async (formData, editId) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('No user session');
 
-      if (addressForm.is_default) {
+      if (formData.is_default) {
         await supabase.from('client_addresses').update({ is_default: false }).eq('client_id', user.id);
       }
 
-      // FIX TEMPORAL: Insertando Galeras por defecto si no hay mapa
-      const addressPayload = {
-        ...addressForm,
-        client_id: user.id,
-        latitude: addressForm.latitude || 8.9167,
-        longitude: addressForm.longitude || -75.1833
-      };
+      const addressPayload = { ...formData, client_id: user.id };
 
       let res;
-      if (editingAddress) {
-        res = await supabase.from('client_addresses').update(addressPayload).eq('id', editingAddress.id);
+      if (editId) {
+        res = await supabase.from('client_addresses').update(addressPayload).eq('id', editId);
       } else {
         res = await supabase.from('client_addresses').insert([addressPayload]);
       }
 
       if (res.error) throw res.error;
 
-      toast.success(editingAddress ? 'Dirección actualizada' : 'Dirección guardada');
+      toast.success(editId ? 'Dirección actualizada' : 'Dirección guardada');
       setShowAddressModal(false);
       setEditingAddress(null);
-      setAddressForm({ address_name: '', address_line: '', instructions: '', is_default: false, latitude: null, longitude: null });
-      fetchUserDataAndLogistics();
+      fetchUserDataAndLogistics(); 
     } catch (error) {
       console.error('Error saving address:', error);
       toast.error('Error al guardar la dirección');
-    } finally {
-      setAddrLoading(false);
     }
   };
 
-  const handleApplyCoupon = async () => {
-    if (!couponCode.trim()) return;
-    try {
-      const { data, error } = await supabase
-        .from('coupons')
-        .select('*')
-        .eq('code', couponCode.toUpperCase())
-        .eq('active', true)
-        .single();
-
-      if (error || !data) {
-        toast.error('Cupón inválido o expirado');
-        return;
-      }
-
-      setAppliedCoupon(data);
-      toast.success(`¡Cupón aplicado! ${data.discount}% de descuento`);
-    } catch (error) {
-      toast.error('Error al aplicar el cupón');
+  const handleConfirmOrderAndWhatsApp = async () => {
+    if (!selectedAddress) {
+      toast.error('Por favor, indica tu dirección en el mapa.');
+      return;
     }
-  };
 
-  const handleConfirmOrder = async () => {
-    if (!selectedAddress || !selectedPaymentMethod) {
-      toast.error('Selecciona dirección y método de pago');
+    if (!storeData?.phone) {
+      toast.error('La tienda no tiene un número de WhatsApp configurado.');
       return;
     }
 
@@ -219,63 +160,67 @@ const Checkout = () => {
       setProcessing(true);
       const { data: { user } } = await supabase.auth.getUser();
 
-      // PIN de Seguridad de 4 dígitos solo si NO es mensajería certificada
       const deliveryPin = deliveryMethod !== 'certified' 
         ? Math.floor(1000 + Math.random() * 9000).toString() 
         : null;
 
+      const orderNumber = 'ORD-' + Math.random().toString(36).substr(2, 6).toUpperCase();
+
+      // FIX: Adaptado a los ENUMs estrictos de tu base de datos actual
       const orderData = {
         client_id: user.id,
         store_id: cartItems[0].store_id,
         total: total,
         subtotal: subtotal,
         delivery_cost: finalDeliveryFee,
-        discount: discount,
-        status: 'created',
+        discount: 0,
+        status: 'created', // <-- CORRECCIÓN CRÍTICA (Evita error de ENUM status)
         delivery_address: selectedAddress.address_line,
-        // Usamos las coordenadas reales de la dirección seleccionada
-        delivery_latitude: selectedAddress.latitude || 8.9167,
-        delivery_longitude: selectedAddress.longitude || -75.1833,
-        payment_method: selectedPaymentMethod.type,
-        order_number: 'ORD-' + Math.random().toString(36).substr(2, 6).toUpperCase(),
+        delivery_latitude: selectedAddress.latitude,
+        delivery_longitude: selectedAddress.longitude,
+        payment_method: 'cash', // <-- CORRECCIÓN CRÍTICA (Evita error de ENUM payment_method)
+        order_number: orderNumber,
         delivery_instructions: notes || '',
-        coupon_id: appliedCoupon?.id || null,
-        
-        // NUEVAS COLUMNAS DE LÓGICA
         delivery_tier: deliveryTier,
-        delivery_type: deliveryMethod, // 'express', 'encargo', 'certified'
+        delivery_type: deliveryMethod,
         delivery_pin: deliveryPin
       };
 
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .insert(orderData)
-        .select()
-        .single();
-
+      const { data: order, error: orderError } = await supabase.from('orders').insert(orderData).select().single();
       if (orderError) throw orderError;
 
       const orderItemsData = cartItems.map(item => ({
         order_id: order.id,
         product_id: item.id,
         product_name: item.name,
-        product_image_url: item.image_url,
         quantity: item.quantity,
         unit_price: item.price,
         subtotal: item.price * item.quantity,
       }));
 
-      const { error: itemsError } = await supabase.from('order_items').insert(orderItemsData);
-      if (itemsError) throw itemsError;
+      await supabase.from('order_items').insert(orderItemsData);
 
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      let itemsText = cartItems.map(item => `▪️ ${item.quantity}x ${item.name} ($${(item.price * item.quantity).toLocaleString()})`).join('\n');
+      
+      let deliveryInfoText = deliveryMethod === 'express' 
+        ? `Envío Express: $${finalDeliveryFee.toLocaleString()}`
+        : deliveryMethod === 'encargo' 
+          ? `Envío: Encargo Rutero (A convenir)`
+          : `Envío: Mensajería Certificada (A convenir)`;
+
+      const googleMapsLink = `http://maps.google.com/maps?q=${selectedAddress.latitude},${selectedAddress.longitude}`;
+
+      const message = `Hola *${storeData.name}* 👋\nSoy un cliente desde la App Galeras y quiero realizar este pedido (Orden: ${orderNumber}):\n\n*PRODUCTOS:*\n${itemsText}\n\n*RESUMEN:*\nSubtotal: $${subtotal.toLocaleString()}\n${deliveryInfoText}\n*TOTAL ESTIMADO: $${total.toLocaleString()}*\n\n*MI UBICACIÓN:*\nDirección: ${selectedAddress.address_name} - ${selectedAddress.address_line}\nNotas: ${notes || 'N/A'}\n📍 Ver en mapa: ${googleMapsLink}\n\n¿Me confirman disponibilidad y método de pago, por favor?`;
+
+      const whatsappUrl = `https://wa.me/${storeData.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+
       clearCart();
-      toast.success('¡Pedido realizado con éxito!');
+      window.open(whatsappUrl, '_blank');
       navigate(`/orders/${order.id}`);
 
     } catch (error) {
-      console.error('Final Confirm Order Error:', error);
-      toast.error('Error al confirmar pedido. Verifica la consola.');
+      console.error('Error procesando pedido:', error);
+      toast.error('Ocurrió un error. Verifica la consola.');
     } finally {
       setProcessing(false);
     }
@@ -290,15 +235,14 @@ const Checkout = () => {
           <button onClick={() => navigate('/cart')} className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 mb-4">
             <span className="font-medium">← Volver al carrito</span>
           </button>
-          <h1 className="text-3xl font-bold text-gray-900">Finalizar pedido</h1>
+          <h1 className="text-3xl font-bold text-gray-900">Confirmar y Enviar</h1>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
             
-            {/* 1. SELECCIÓN DE DIRECCIÓN */}
             <Card padding="md">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Dirección de entrega</h2>
+              <h2 className="text-xl font-bold text-gray-900 mb-4">📍 ¿Dónde te lo enviamos?</h2>
               {addresses.length > 0 ? (
                 <div className="space-y-3">
                   {addresses.map((address) => (
@@ -311,92 +255,75 @@ const Checkout = () => {
                         <div>
                           <p className="font-semibold text-gray-900">{address.address_name}</p>
                           <p className="text-sm text-gray-600">{address.address_line}</p>
+                          {address.instructions && <p className="text-xs text-gray-500 mt-1">{address.instructions}</p>}
                         </div>
                       </div>
                     </div>
                   ))}
+                  <div className="mt-4 text-center">
+                    <button onClick={() => { setEditingAddress(null); setShowAddressModal(true); }} className="text-sm font-semibold text-blue-600 underline">
+                      + Agregar otra dirección con el mapa
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="text-center py-8">
-                  <Button onClick={() => setShowAddressModal(true)}>Agregar dirección</Button>
+                  <p className="text-gray-500 mb-4">Necesitamos tu ubicación exacta para enviarte tu pedido.</p>
+                  <Button onClick={() => { setEditingAddress(null); setShowAddressModal(true); }}>Abrir Mapa</Button>
                 </div>
               )}
             </Card>
 
-            {/* 2. MÉTODO DE ENVÍO (LÓGICA DE 3 NIVELES) */}
             {selectedAddress && deliveryTier && (
               <Card padding="md" className="border-blue-100 bg-blue-50/30">
-                <h2 className="text-xl font-bold text-gray-900 mb-2">Método de Envío</h2>
+                <h2 className="text-xl font-bold text-gray-900 mb-2">🚚 Logística Asignada</h2>
                 <p className="text-sm text-gray-600 mb-4">{coverageMsg}</p>
                 
                 <div className="space-y-3">
-                  {/* NIVEL 1: Solo Express */}
                   {deliveryTier === 1 && (
-                    <label className="flex items-start p-4 border-2 border-blue-600 bg-blue-50 rounded-xl cursor-pointer">
-                      <input type="radio" checked readOnly className="mt-1 w-4 h-4 text-blue-600" />
-                      <div className="ml-3">
-                        <span className="block font-semibold text-gray-900">Envío Local Express</span>
-                        <span className="block text-sm text-gray-500">Entrega rápida por nuestra flota local.</span>
-                      </div>
-                    </label>
+                    <div className="p-4 border-2 border-blue-600 bg-blue-50 rounded-xl">
+                      <span className="block font-semibold text-gray-900">Envío Local Express</span>
+                      <span className="block text-sm text-gray-500">Repartidor local. Costo: ${finalDeliveryFee.toLocaleString()}</span>
+                    </div>
                   )}
 
-                  {/* NIVEL 2: Encargo o Certificada */}
                   {deliveryTier === 2 && (
                     <>
                       <label className={`flex items-start p-4 border-2 rounded-xl cursor-pointer ${deliveryMethod === 'encargo' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 bg-white'}`}>
                         <input type="radio" checked={deliveryMethod === 'encargo'} onChange={() => setDeliveryMethod('encargo')} className="mt-1 w-4 h-4 text-blue-600" />
                         <div className="ml-3">
-                          <span className="block font-semibold text-gray-900">Encargo Rutero (Bolsa de Viajes)</span>
-                          <span className="block text-sm text-gray-500">Un conductor en ruta llevará tu pedido. Costo a convenir.</span>
+                          <span className="block font-semibold text-gray-900">Encargo Rutero</span>
+                          <span className="block text-sm text-gray-500">Sujeto a vehículos en ruta.</span>
                         </div>
                       </label>
                       <label className={`flex items-start p-4 border-2 rounded-xl cursor-pointer ${deliveryMethod === 'certified' ? 'border-green-600 bg-green-50' : 'border-gray-200 bg-white'}`}>
                         <input type="radio" checked={deliveryMethod === 'certified'} onChange={() => setDeliveryMethod('certified')} className="mt-1 w-4 h-4 text-green-600" />
                         <div className="ml-3">
                           <span className="block font-semibold text-gray-900">Mensajería Certificada</span>
-                          <span className="block text-sm text-gray-500">Inter Rapidísimo / Servientrega. Más seguro para larga distancia.</span>
+                          <span className="block text-sm text-gray-500">Más seguro, flete a convenir con la tienda.</span>
                         </div>
                       </label>
                     </>
                   )}
 
-                  {/* NIVEL 3: Solo Certificada */}
                   {deliveryTier === 3 && (
-                    <label className="flex items-start p-4 border-2 border-green-600 bg-green-50 rounded-xl cursor-pointer">
-                      <input type="radio" checked readOnly className="mt-1 w-4 h-4 text-green-600" />
-                      <div className="ml-3">
-                        <span className="block font-semibold text-gray-900">Mensajería Certificada (Inter Rapidísimo)</span>
-                        <span className="block text-sm text-gray-500">La tienda te contactará para coordinar el pago del flete nacional.</span>
-                      </div>
-                    </label>
+                    <div className="p-4 border-2 border-green-600 bg-green-50 rounded-xl">
+                      <span className="block font-semibold text-gray-900">Mensajería Certificada</span>
+                      <span className="block text-sm text-gray-500">Se enviará por Inter Rapidísimo/Servientrega.</span>
+                    </div>
                   )}
                 </div>
               </Card>
             )}
 
-            {/* 3. MÉTODO DE PAGO */}
             <Card padding="md">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Método de pago</h2>
-              <div className="space-y-3">
-                <div onClick={() => setSelectedPaymentMethod({ type: 'cash' })} className={`p-4 rounded-xl border-2 cursor-pointer ${selectedPaymentMethod?.type === 'cash' ? 'border-blue-600 bg-blue-50' : 'border-gray-200'}`}>
-                  <p className="font-semibold text-gray-900">💵 Efectivo (Contra entrega)</p>
-                </div>
-                <div onClick={() => setSelectedPaymentMethod({ type: 'bank_transfer' })} className={`p-4 rounded-xl border-2 cursor-pointer ${selectedPaymentMethod?.type === 'bank_transfer' ? 'border-blue-600 bg-blue-50' : 'border-gray-200'}`}>
-                  <p className="font-semibold text-gray-900">📲 Transferencia (Nequi/Daviplata)</p>
-                </div>
-              </div>
-            </Card>
-
-            <Card padding="md">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Notas</h2>
-              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="w-full px-4 py-3 border rounded-xl" placeholder="Instrucciones especiales..." />
+              <h2 className="text-xl font-bold text-gray-900 mb-4">📝 Notas al comercio</h2>
+              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="w-full px-4 py-3 border rounded-xl" placeholder="Sin cebolla, o dejar en portería..." />
             </Card>
           </div>
 
-          {/* RESUMEN LATERAL */}
           <div className="lg:col-span-1">
-            <Card padding="md" className="sticky top-20">
+            <Card padding="md" className="sticky top-20 border-green-200">
               <h2 className="text-xl font-bold text-gray-900 mb-4">Resumen</h2>
               
               <div className="space-y-3 border-b pb-4 mb-4">
@@ -408,26 +335,47 @@ const Checkout = () => {
                   <span>Envío</span>
                   <span className="font-medium">{deliveryMethod === 'express' ? `$${finalDeliveryFee.toLocaleString()}` : 'A convenir'}</span>
                 </div>
-                {discount > 0 && (
-                  <div className="flex justify-between text-green-600">
-                    <span>Descuento</span>
-                    <span>-${discount.toLocaleString()}</span>
-                  </div>
-                )}
               </div>
               
               <div className="flex justify-between text-xl font-bold text-gray-900 mb-6">
-                <span>Total estimado</span>
+                <span>Total Estimado</span>
                 <span>${total.toLocaleString()}</span>
               </div>
 
-              <Button fullWidth size="lg" onClick={handleConfirmOrder} disabled={!selectedAddress || !selectedPaymentMethod || processing}>
-                {processing ? 'Procesando...' : 'Confirmar pedido'}
-              </Button>
+              <button 
+                onClick={handleConfirmOrderAndWhatsApp} 
+                disabled={!selectedAddress || processing}
+                className="w-full flex items-center justify-center gap-2 bg-[#25D366] hover:bg-[#128C7E] text-white font-bold py-4 px-6 rounded-xl transition-colors disabled:opacity-50"
+              >
+                {processing ? (
+                  'Generando Orden...'
+                ) : (
+                  <>
+                    <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51a12.8 12.8 0 0 0-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/>
+                    </svg>
+                    Pedir por WhatsApp
+                  </>
+                )}
+              </button>
+              <p className="text-xs text-gray-500 text-center mt-4">
+                No pagas nada aquí. El pago lo acuerdas directo con la tienda por WhatsApp.
+              </p>
             </Card>
           </div>
         </div>
       </div>
+
+      <AddressModal 
+        isOpen={showAddressModal} 
+        onClose={() => {
+          setShowAddressModal(false);
+          setEditingAddress(null);
+        }}
+        onSave={handleSaveAddressFromModal}
+        editingAddress={editingAddress}
+      />
+      
     </ClientLayout>
   );
 };

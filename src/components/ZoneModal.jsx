@@ -196,9 +196,9 @@ export default function ZoneModal({ zone, onClose, onSave }) {
     toast.loading('Buscando ciudad...');
 
     try {
-      // Usar API de Nominatim (OpenStreetMap)
+      // Usar API de Nominatim (OpenStreetMap) con contexto regional forzado
       const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(citySearch)}&country=Colombia&limit=1`
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(citySearch + ', Sucre, Colombia')}&limit=1`
       );
 
       const data = await response.json();
