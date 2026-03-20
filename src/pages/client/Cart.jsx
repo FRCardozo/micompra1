@@ -44,13 +44,13 @@ const Cart = () => {
   };
 
   const handleRemoveItem = (productId) => {
-    if (window.confirm('¿Estás seguro de que deseas eliminar este producto del carrito?')) {
+    if (window.confirm('¿Estás seguro de que deseas eliminar este producto de tu cotización?')) {
       removeFromCart(productId);
     }
   };
 
   const handleClearCart = () => {
-    if (window.confirm('¿Estás seguro de que deseas vaciar el carrito?')) {
+    if (window.confirm('¿Estás seguro de que deseas vaciar tu lista?')) {
       clearCart();
     }
   };
@@ -74,9 +74,9 @@ const Cart = () => {
     return (
       <ClientLayout>
         <EmptyState
-          icon="🛒"
-          title="Tu carrito está vacío"
-          message="Agrega productos de tus tiendas favoritas para continuar"
+          icon="📝"
+          title="Aún no tienes productos por cotizar"
+          message="Explora nuestras tiendas aliadas y arma tu pedido"
         />
         <div className="flex justify-center mt-6">
           <Button onClick={() => navigate('/stores')}>
@@ -93,14 +93,14 @@ const Cart = () => {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Carrito de compras</h1>
+            <h1 className="text-3xl font-bold text-gray-900">Mi Cotización</h1>
             <p className="text-gray-600 mt-1">
-              {cartItems.length} {cartItems.length === 1 ? 'producto' : 'productos'}
+              {cartItems.length} {cartItems.length === 1 ? 'producto' : 'productos'} listos para solicitar
             </p>
           </div>
           {cartItems.length > 0 && (
             <Button variant="outline" size="sm" onClick={handleClearCart}>
-              Vaciar carrito
+              Vaciar lista
             </Button>
           )}
         </div>
@@ -168,6 +168,7 @@ const Cart = () => {
                       <button
                         onClick={() => handleRemoveItem(item.id)}
                         className="text-red-500 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Eliminar producto"
                       >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -183,7 +184,7 @@ const Cart = () => {
           {/* Order Summary */}
           <div className="lg:col-span-1">
             <Card padding="md" className="sticky top-20">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Resumen del pedido</h2>
+              <h2 className="text-xl font-bold text-gray-900 mb-4">Resumen de Cotización</h2>
 
               <div className="space-y-3 mb-4">
                 <div className="flex justify-between text-gray-600">
@@ -191,14 +192,14 @@ const Cart = () => {
                   <span className="font-medium">${subtotal.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between text-gray-600">
-                  <span>Costo de envío</span>
+                  <span>Costo de envío aprox.</span>
                   <span className="font-medium">
                     {deliveryFee === 0 ? 'Gratis' : `$${deliveryFee.toLocaleString()}`}
                   </span>
                 </div>
                 <div className="border-t border-gray-200 pt-3">
                   <div className="flex justify-between text-lg font-bold text-gray-900">
-                    <span>Total</span>
+                    <span>Total Estimado</span>
                     <span>${total.toLocaleString()}</span>
                   </div>
                 </div>
@@ -210,7 +211,7 @@ const Cart = () => {
                 onClick={handleCheckout}
                 disabled={cartItems.length === 0}
               >
-                Proceder al pago
+                Revisar Cotización
               </Button>
 
               {/* Additional Info */}

@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ClientLayout from '../../components/layouts/ClientLayout';
-import { Card, Button, LoadingSpinner } from '../../components/common';
+import { Button, LoadingSpinner } from '../../components/common';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
-import { toast } from 'react-hot-toast';
 
 const Home = () => {
   const navigate = useNavigate();
@@ -14,7 +13,6 @@ const Home = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [isFirstOrder, setIsFirstOrder] = useState(false);
-  const [isLocationLoading, setIsLocationLoading] = useState(false);
 
   const categoryStyles = {
     food: { color: 'bg-orange-100 text-orange-600' },
@@ -91,32 +89,9 @@ const Home = () => {
     }
   };
 
-  const handleActivateLocation = () => {
-    if (!navigator.geolocation) {
-      toast.error('Tu navegador no soporta geolocalización');
-      return;
-    }
-
-    setIsLocationLoading(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setIsLocationLoading(false);
-        toast.success('Ubicación activada correctamente');
-        console.log('Location:', position.coords);
-        // Here you could save the coords to context or state
-      },
-      (error) => {
-        setIsLocationLoading(false);
-        let message = 'Error al obtener ubicación';
-        if (error.code === 1) message = 'Permiso de ubicación denegado';
-        toast.error(message);
-      }
-    );
-  };
-
   return (
     <ClientLayout>
-      <div className="space-y-12">
+      <div className="space-y-12 pb-8">
         {/* Welcome Banner & Search */}
         <div className="relative overflow-hidden bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700 rounded-3xl p-8 md:p-16 text-white shadow-2xl">
           <div className="relative z-10 max-w-2xl">
@@ -299,33 +274,6 @@ const Home = () => {
               </div>
             </div>
           )}
-        </section>
-
-        {/* Near You Section */}
-        <section className="pb-8">
-          <h2 className="text-2xl md:text-3xl font-bold text-gray-900 mb-6">Cerca de ti</h2>
-          <div className="relative overflow-hidden bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 rounded-3xl p-12 text-center border border-blue-100">
-            <div className="relative z-10 max-w-md mx-auto">
-              <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg">
-                <span className="text-4xl">📍</span>
-              </div>
-              <h3 className="text-2xl font-bold text-gray-900 mb-3">
-                Activa tu ubicación
-              </h3>
-              <p className="text-gray-600 mb-6 text-lg">
-                Para ver tiendas y restaurantes cerca de ti
-              </p>
-              <button
-                onClick={handleActivateLocation}
-                disabled={isLocationLoading}
-                className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-8 py-4 rounded-2xl font-semibold transition-all shadow-lg hover:shadow-xl hover:scale-105 disabled:opacity-70"
-              >
-                {isLocationLoading ? 'Activando...' : 'Activar ubicación'}
-              </button>
-            </div>
-            <div className="absolute top-0 right-0 w-40 h-40 bg-blue-200/30 rounded-full -mr-20 -mt-20" />
-            <div className="absolute bottom-0 left-0 w-32 h-32 bg-purple-200/30 rounded-full -ml-16 -mb-16" />
-          </div>
         </section>
       </div>
     </ClientLayout>

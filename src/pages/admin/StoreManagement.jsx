@@ -67,7 +67,6 @@ const StoreManagement = () => {
   };
 
   const fetchStores = async () => {
-    console.log('[StoreManagement] Fetching stores');
     const { data, error } = await supabase
       .from('stores')
       .select(`
@@ -82,7 +81,6 @@ const StoreManagement = () => {
       throw error;
     }
 
-    console.log('[StoreManagement] Stores fetched:', data?.length);
     setStores(data || []);
   };
 
@@ -152,7 +150,6 @@ const StoreManagement = () => {
 
   const handleCreateStore = async (e) => {
     e.preventDefault();
-    console.log('[StoreManagement] Creating store:', formData);
 
     try {
       const slug = formData.name.toLowerCase().replace(/\s+/g, '-');
@@ -172,7 +169,6 @@ const StoreManagement = () => {
 
       if (error) throw error;
 
-      console.log('[StoreManagement] Store created successfully:', data);
       toast.success('Tienda creada exitosamente');
       setShowCreateModal(false);
       resetForm();
@@ -185,12 +181,12 @@ const StoreManagement = () => {
 
   const handleEditStore = async (e) => {
     e.preventDefault();
-    console.log('[StoreManagement] Updating store:', selectedStore.id, formData);
 
     try {
       const slug = formData.name.toLowerCase().replace(/\s+/g, '-');
 
-      const { data, error } = await supabase
+      // Se eliminó el .select().single() para evitar el error PGRST116
+      const { error } = await supabase
         .from('stores')
         .update({
           ...formData,
@@ -201,13 +197,10 @@ const StoreManagement = () => {
           delivery_radius_km: parseFloat(formData.delivery_radius_km) || 5,
           updated_at: new Date().toISOString()
         })
-        .eq('id', selectedStore.id)
-        .select()
-        .single();
+        .eq('id', selectedStore.id);
 
       if (error) throw error;
 
-      console.log('[StoreManagement] Store updated successfully:', data);
       toast.success('Tienda actualizada exitosamente');
       setShowEditModal(false);
       setSelectedStore(null);
@@ -225,8 +218,6 @@ const StoreManagement = () => {
       return;
     }
 
-    console.log('[StoreManagement] Deleting store:', selectedStore.id);
-
     try {
       const { error } = await supabase
         .from('stores')
@@ -235,7 +226,6 @@ const StoreManagement = () => {
 
       if (error) throw error;
 
-      console.log('[StoreManagement] Store deleted successfully');
       toast.success('Tienda eliminada exitosamente');
       setShowDeleteModal(false);
       setSelectedStore(null);
@@ -248,7 +238,6 @@ const StoreManagement = () => {
   };
 
   const openEditModal = (store) => {
-    console.log('[StoreManagement] Opening edit modal for store:', store.id);
     setSelectedStore(store);
     setFormData({
       name: store.name || '',
@@ -269,7 +258,6 @@ const StoreManagement = () => {
   };
 
   const openDeleteModal = (store) => {
-    console.log('[StoreManagement] Opening delete modal for store:', store.id);
     setSelectedStore(store);
     setDeleteConfirmText('');
     setShowDeleteModal(true);

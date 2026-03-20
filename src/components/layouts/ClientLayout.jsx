@@ -113,13 +113,13 @@ const ClientLayout = ({ children }) => {
 
       if (error) throw error;
 
-      toast.success(addressId ? 'Direccion actualizada' : 'Direccion guardada');
+      toast.success(addressId ? 'Dirección actualizada' : 'Dirección guardada');
       setAddressModalOpen(false);
       setEditingAddress(null);
       await fetchAddresses();
     } catch (error) {
       console.error('[ClientLayout] Error saving address:', error);
-      toast.error('Error al guardar la direccion');
+      toast.error('Error al guardar la dirección');
     } finally {
       setAddressLoading(false);
     }
@@ -135,7 +135,6 @@ const ClientLayout = ({ children }) => {
   const isActive = (path) => location.pathname === path;
 
   const handleLogout = async () => {
-    console.log('[ClientLayout] Logout initiated');
     setShowUserMenu(false);
     setShowMobileMenu(false);
     await signOut();
@@ -147,6 +146,8 @@ const ClientLayout = ({ children }) => {
     !addressLoading &&
     (addresses.length === 0 || !addresses.some((addr) => addr.is_default));
 
+  const defaultAddress = addresses.find(a => a.is_default) || addresses[0];
+
   return (
     <div className="min-h-screen bg-gray-50">
       <ActiveMandadosModal
@@ -157,13 +158,36 @@ const ClientLayout = ({ children }) => {
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            {/* Logo */}
-            <Link to="/" className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl flex items-center justify-center">
+            
+            {/* Logo y Ubicación Estilo Rappi */}
+            <div className="flex items-center space-x-2">
+              <Link to="/" className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl flex items-center justify-center shrink-0">
                 <span className="text-white font-bold text-lg">R</span>
-              </div>
-              <span className="text-xl font-bold text-gray-900">Rappi Clone</span>
-            </Link>
+              </Link>
+              
+              {user ? (
+                <div 
+                  className="flex flex-col cursor-pointer ml-1"
+                  onClick={() => {
+                    setEditingAddress(null);
+                    setAddressModalOpen(true);
+                  }}
+                >
+                  <div className="flex items-center text-sm font-extrabold text-gray-900">
+                    <span className="text-orange-600 mr-1 text-base">📍</span>
+                    <span className="truncate max-w-[140px] sm:max-w-[200px]">
+                      {defaultAddress ? (defaultAddress.address_name || defaultAddress.address_line) : 'Agregar dirección'}
+                    </span>
+                    <svg className="w-4 h-4 ml-1 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                  </div>
+                  <span className="text-xs text-gray-500 ml-6 -mt-0.5">{defaultAddress ? 'Galeras, Sucre' : 'Toca para configurar'}</span>
+                </div>
+              ) : (
+                <Link to="/" className="text-xl font-bold text-gray-900">
+                  Rappi Clone
+                </Link>
+              )}
+            </div>
 
             {/* Desktop Navigation */}
             <nav className="hidden md:flex items-center space-x-1">
@@ -241,7 +265,7 @@ const ClientLayout = ({ children }) => {
                       className="w-full flex items-center space-x-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors text-left"
                     >
                       <span>🚪</span>
-                      <span>Cerrar Sesion</span>
+                      <span>Cerrar Sesión</span>
                     </button>
                   </div>
                 )}
@@ -266,7 +290,6 @@ const ClientLayout = ({ children }) => {
           {/* Mobile Navigation */}
           {showMobileMenu && (
             <div className="md:hidden py-4 border-t">
-              {/* User Info */}
               <div className="px-4 py-3 mb-2 border-b border-gray-100">
                 <div className="flex items-center space-x-3">
                   <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
@@ -308,13 +331,12 @@ const ClientLayout = ({ children }) => {
                   Mandados Activos
                 </button>
 
-                {/* Logout Button in Mobile Menu */}
                 <button
                   onClick={handleLogout}
                   className="flex items-center px-4 py-3 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-colors mt-2"
                 >
                   <span className="mr-2">🚪</span>
-                  Cerrar Sesion
+                  Cerrar Sesión
                 </button>
               </nav>
             </div>
@@ -329,7 +351,7 @@ const ClientLayout = ({ children }) => {
             <div className="flex items-start gap-3 text-gray-800">
               <span className="text-xl">📍</span>
               <p className="text-sm sm:text-base font-medium">
-                Para mostrarte los mejores comercios, necesitamos tu ubicacion.
+                Para mostrarte los mejores comercios, necesitamos tu ubicación.
               </p>
             </div>
             <button
@@ -339,7 +361,7 @@ const ClientLayout = ({ children }) => {
               }}
               className="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors"
             >
-              Configurar ubicacion
+              Configurar ubicación
             </button>
           </div>
         </div>
