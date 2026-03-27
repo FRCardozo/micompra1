@@ -1,537 +1,210 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import StoreLayout from '../../components/layouts/StoreLayout';
 import { supabase } from '../../lib/supabase';
-import toast from 'react-hot-toast';
-import { Plus, Search, Edit2, Trash2, Package } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
+import { toast } from 'react-hot-toast';
+import { Plus, Edit2, Trash2, Image as ImageIcon, X, Upload } from 'lucide-react';
 
-const Products = () => {
+const StoreProducts = () => {
+  const { profile } = useAuth();
+  const [store, setStore] = useState(null);
   const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+  
   const [showModal, setShowModal] = useState(false);
-  const [editingProduct, setEditingProduct] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef(null);
+  
   const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    price: '',
-    category: '',
-    image_url: '',
-    available: true,
+    id: null, name: '', description: '', price: '', image_url: '', category_id: '', is_active: true
   });
 
   useEffect(() => {
-    fetchProducts();
-  }, []);
+    if (profile?.id) fetchData();
+  }, [profile]);
 
-  const fetchProducts = async () => {
+  const fetchData = async () => {
     try {
-      setLoading(true);
-      console.log('[Products] Starting fetchProducts...');
-      const { data: { user } } = await supabase.auth.getUser();
-
-      if (!user) {
-        console.error('[Products] No user found');
-        toast.error('Debes iniciar sesión');
-        return;
+      const { data: storeData } = await supabase.from('stores').select('id').eq('owner_id', profile.id).single();
+      if (storeData) {
+        setStore(storeData);
+        const { data: prodData } = await supabase.from('products').select('*, store_categories(name)').eq('store_id', storeData.id).order('created_at', { ascending: false });
+        setProducts(prodData || []);
+        const { data: catData } = await supabase.from('store_categories').select('id, name').eq('store_id', storeData.id).order('name');
+        setCategories(catData || []);
       }
-
-      console.log('[Products] User ID:', user.id);
-
-      // Get store by owner_id
-      const { data: store, error: storeError } = await supabase
-        .from('stores')
-        .select('id')
-        .eq('owner_id', user.id)
-        .maybeSingle();
-
-      if (storeError) {
-        console.error('[Products] Store fetch error:', storeError);
-        toast.error('Error al verificar tu tienda');
-        setLoading(false);
-        return;
-      }
-
-      if (!store) {
-        console.error('[Products] No store found for user:', user.id);
-        toast.error('No se encontró una tienda asociada a tu cuenta. Contacta a soporte.');
-        setLoading(false);
-        return;
-      }
-
-      console.log('[Products] Store ID:', store.id);
-
-      // Fetch products for this store
-      const { data, error } = await supabase
-        .from('products')
-        .select(`
-          *,
-          category:category_id (name)
-        `)
-        .eq('store_id', store.id)
-        .order('name', { ascending: true });
-
-      if (error) {
-        console.error('[Products] Products fetch error:', error);
-        throw error;
-      }
-
-      console.log('[Products] Loaded products:', data?.length || 0);
-      setProducts(data || []);
     } catch (error) {
-      console.error('[Products] Error fetching products:', error);
-      toast.error('Error al cargar productos');
+      console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    console.log('[Products] Starting handleSubmit...');
-
+  const handleImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file || !store) return;
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-
-      if (!user) {
-        console.error('[Products] No user in handleSubmit');
-        toast.error('Debes iniciar sesión');
-        return;
-      }
-
-      console.log('[Products] User ID in handleSubmit:', user.id);
-
-      // Get store by owner_id
-      const { data: store, error: storeError } = await supabase
-        .from('stores')
-        .select('id')
-        .eq('owner_id', user.id)
-        .single();
-
-      if (storeError || !store) {
-        console.error('[Products] Store fetch error in handleSubmit:', storeError);
-        toast.error('No se encontró tu tienda');
-        return;
-      }
-
-      console.log('[Products] Store ID in handleSubmit:', store.id);
-
-      // Generate slug from product name
-      const slug = formData.name
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '') // Remove accents
-        .replace(/[^a-z0-9\s-]/g, '') // Remove special chars
-        .trim()
-        .replace(/\s+/g, '-') // Replace spaces with -
-        .replace(/-+/g, '-'); // Replace multiple - with single -
-
-      const productData = {
-        name: formData.name,
-        description: formData.description || null,
-        price: parseFloat(formData.price),
-        category_id: null, // Will be handled later with proper categories
-        image_url: formData.image_url || null,
-        is_available: formData.available,
-        store_id: store.id,
-        slug: editingProduct ? editingProduct.slug : `${slug}-${Date.now()}`,
-      };
-
-      console.log('[Products] Product data to save:', productData);
-
-      if (editingProduct) {
-        // Update existing product
-        const { error } = await supabase
-          .from('products')
-          .update(productData)
-          .eq('id', editingProduct.id);
-
-        if (error) {
-          console.error('[Products] Update error:', error);
-          throw error;
-        }
-        console.log('[Products] Product updated successfully');
-        toast.success('Producto actualizado exitosamente');
-      } else {
-        // Create new product
-        const { data: newProduct, error } = await supabase
-          .from('products')
-          .insert([productData])
-          .select();
-
-        if (error) {
-          console.error('[Products] Insert error:', error);
-          throw error;
-        }
-        console.log('[Products] Product created successfully:', newProduct);
-        toast.success('Producto creado exitosamente');
-      }
-
-      setShowModal(false);
-      setEditingProduct(null);
-      setFormData({
-        name: '',
-        description: '',
-        price: '',
-        category: '',
-        image_url: '',
-        available: true,
-      });
-      fetchProducts();
+      setIsUploading(true);
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${store.id}_${Math.random().toString(36).substring(2)}.${fileExt}`;
+      const filePath = `product_images/${fileName}`;
+      
+      // Aquí estamos SUBIENDO EL ARCHIVO FÍSICO a tu base de datos
+      const { error: uploadError } = await supabase.storage.from('products').upload(filePath, file);
+      if (uploadError) throw uploadError;
+      
+      const { data: { publicUrl } } = supabase.storage.from('products').getPublicUrl(filePath);
+      setFormData({ ...formData, image_url: publicUrl });
+      toast.success('¡Foto subida con éxito!');
     } catch (error) {
-      console.error('[Products] Error saving product:', error);
-      toast.error(`Error al guardar producto: ${error.message}`);
+      toast.error('Error al subir la foto');
+    } finally {
+      setIsUploading(false);
     }
   };
 
-  const handleEdit = (product) => {
-    setEditingProduct(product);
-    setFormData({
-      name: product.name,
-      description: product.description || '',
-      price: product.price.toString(),
-      category: product.category || '',
-      image_url: product.image_url || '',
-      available: product.is_available,
-    });
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!formData.category_id) return toast.error('Por favor selecciona una categoría');
+    try {
+      setIsUploading(true);
+      
+      // Generador automático de SLUG (Soluciona el error 400)
+      const generatedSlug = formData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Math.floor(Math.random() * 1000);
+
+      const payload = {
+        store_id: store.id, 
+        name: formData.name, 
+        slug: generatedSlug, // Se envía automáticamente a la base de datos
+        description: formData.description,
+        price: parseFloat(formData.price), 
+        image_url: formData.image_url,
+        category_id: formData.category_id, 
+        is_active: formData.is_active
+      };
+      
+      if (formData.id) {
+        const { error } = await supabase.from('products').update(payload).eq('id', formData.id);
+        if (error) throw error;
+        toast.success('Producto actualizado');
+      } else {
+        const { error } = await supabase.from('products').insert([payload]);
+        if (error) throw error;
+        toast.success('Producto creado exitosamente');
+      }
+      setShowModal(false);
+      fetchData(); 
+    } catch (error) {
+      console.error('Error al guardar:', error);
+      toast.error('Ocurrió un error al guardar el producto');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // BOTÓN DE ELIMINAR PRODUCTO (Bote de basura)
+  const handleDeleteProduct = async (productId) => {
+    if (!window.confirm('¿Seguro que deseas ELIMINAR este producto de tu catálogo? Esta acción no se puede deshacer.')) return;
+    
+    try {
+      const { error } = await supabase.from('products').delete().eq('id', productId);
+      if (error) throw error;
+      toast.success('Producto eliminado del sistema');
+      fetchData(); // Recarga la lista automáticamente
+    } catch (error) {
+      toast.error('No se pudo eliminar el producto');
+    }
+  };
+
+  const openModal = (product = null) => {
+    if (product) {
+      setFormData(product);
+    } else {
+      const defaultCategory = categories.length > 0 ? categories[0].id : '';
+      setFormData({ id: null, name: '', description: '', price: '', image_url: '', category_id: defaultCategory, is_active: true });
+    }
     setShowModal(true);
   };
 
-  const handleDelete = async (productId) => {
-    if (!confirm('¿Estás seguro de que deseas eliminar este producto?')) {
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from('products')
-        .delete()
-        .eq('id', productId);
-
-      if (error) throw error;
-
-      toast.success('Producto eliminado exitosamente');
-      fetchProducts();
-    } catch (error) {
-      console.error('Error deleting product:', error);
-      toast.error('Error al eliminar producto');
-    }
-  };
-
-  const toggleAvailability = async (product) => {
-    try {
-      const { error } = await supabase
-        .from('products')
-        .update({ is_available: !product.is_available })
-        .eq('id', product.id);
-
-      if (error) throw error;
-
-      toast.success(
-        `Producto ${!product.is_available ? 'activado' : 'desactivado'} exitosamente`
-      );
-      fetchProducts();
-    } catch (error) {
-      console.error('Error toggling availability:', error);
-      toast.error('Error al actualizar disponibilidad');
-    }
-  };
-
-  const filteredProducts = products.filter((product) =>
-    product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    product.category?.name?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  if (loading) {
-    return (
-      <StoreLayout>
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
-        </div>
-      </StoreLayout>
-    );
-  }
+  if (loading) return <StoreLayout><div className="p-10 text-center">Cargando catálogo...</div></StoreLayout>;
 
   return (
     <StoreLayout>
-      <div>
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Productos</h1>
-          <p className="text-gray-600">Gestiona tu catálogo de productos</p>
+      <div className="space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div><h1 className="text-2xl font-bold text-gray-900">Mi Catálogo</h1></div>
+          <button onClick={() => openModal()} className="flex items-center gap-2 bg-purple-600 text-white px-5 py-3 rounded-xl font-bold hover:bg-purple-700 transition-colors">
+            <Plus className="w-5 h-5" /> Agregar Producto
+          </button>
         </div>
 
-        {/* Actions Bar */}
-        <div className="bg-white rounded-xl shadow-sm p-4 mb-6">
-          <div className="flex flex-col sm:flex-row gap-4 justify-between">
-            {/* Search */}
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Buscar productos..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              />
+        {categories.length === 0 && (
+            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-md mb-6 text-yellow-700 font-medium">
+              Aún no has creado categorías. Ve a "Perfil" en el menú para crearlas antes de añadir productos.
             </div>
-
-            {/* Add Product Button */}
-            <button
-              onClick={() => {
-                setEditingProduct(null);
-                setFormData({
-                  name: '',
-                  description: '',
-                  price: '',
-                  category: '',
-                  image_url: '',
-                  available: true,
-                });
-                setShowModal(true);
-              }}
-              className="flex items-center justify-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-            >
-              <Plus className="w-5 h-5" />
-              <span>Agregar Producto</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Products Grid */}
-        {filteredProducts.length === 0 ? (
-          <div className="bg-white rounded-xl shadow-sm p-12 text-center">
-            <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">
-              No hay productos
-            </h3>
-            <p className="text-gray-600 mb-6">
-              {searchQuery
-                ? 'No se encontraron productos con ese nombre'
-                : 'Comienza agregando tu primer producto'}
-            </p>
-            {!searchQuery && (
-              <button
-                onClick={() => setShowModal(true)}
-                className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-              >
-                Agregar Producto
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredProducts.map((product) => (
-              <div
-                key={product.id}
-                className="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-shadow"
-              >
-                {/* Product Image */}
-                <div className="h-48 bg-gray-100 relative">
-                  {product.image_url ? (
-                    <img
-                      src={product.image_url}
-                      alt={product.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <Package className="w-16 h-16 text-gray-300" />
-                    </div>
-                  )}
-                  {!product.is_available && (
-                    <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-                      <span className="px-4 py-2 bg-red-500 text-white font-medium rounded-lg">
-                        No Disponible
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Product Info */}
-                <div className="p-4">
-                  <div className="mb-3">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                      {product.name}
-                    </h3>
-                    {product.category?.name && (
-                      <span className="inline-block px-2 py-1 text-xs font-medium text-purple-600 bg-purple-50 rounded">
-                        {product.category.name}
-                      </span>
-                    )}
-                  </div>
-
-                  {product.description && (
-                    <p className="text-sm text-gray-600 mb-3 line-clamp-2">
-                      {product.description}
-                    </p>
-                  )}
-
-                  <div className="flex items-center justify-between mb-4">
-                    <span className="text-2xl font-bold text-gray-900">
-                      ${(product.price || 0).toLocaleString()}
-                    </span>
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleEdit(product)}
-                      className="flex-1 flex items-center justify-center space-x-2 px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                      <span className="text-sm font-medium">Editar</span>
-                    </button>
-                    <button
-                      onClick={() => toggleAvailability(product)}
-                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${product.is_available
-                        ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
-                        : 'bg-green-100 text-green-700 hover:bg-green-200'
-                        }`}
-                    >
-                      {product.is_available ? 'Desactivar' : 'Activar'}
-                    </button>
-                    <button
-                      onClick={() => handleDelete(product.id)}
-                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
         )}
 
-        {/* Add/Edit Product Modal */}
-        {showModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="p-6 border-b border-gray-200">
-                <h2 className="text-xl font-bold text-gray-900">
-                  {editingProduct ? 'Editar Producto' : 'Agregar Producto'}
-                </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {products.map((product) => (
+            <div key={product.id} className={`bg-white rounded-2xl shadow-sm border ${product.is_active ? 'border-gray-100' : 'bg-red-50/30'} overflow-hidden relative group`}>
+              <div className="h-48 bg-gray-100 relative">
+                {product.image_url ? <img src={product.image_url} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-400"><ImageIcon className="w-10 h-10" /></div>}
+                {!product.is_active && (
+                  <div className="absolute top-2 right-2 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-lg">Agotado</div>
+                )}
               </div>
-
-              <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Nombre del Producto *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.name}
-                    onChange={(e) =>
-                      setFormData({ ...formData, name: e.target.value })
-                    }
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    placeholder="Ej: Hamburguesa Clásica"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Descripción
-                  </label>
-                  <textarea
-                    value={formData.description}
-                    onChange={(e) =>
-                      setFormData({ ...formData, description: e.target.value })
-                    }
-                    rows={3}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    placeholder="Descripción del producto..."
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Precio (COP) *
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min="0"
-                      step="100"
-                      value={formData.price}
-                      onChange={(e) =>
-                        setFormData({ ...formData, price: e.target.value })
-                      }
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                      placeholder="15000"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Categoría
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.category}
-                      onChange={(e) =>
-                        setFormData({ ...formData, category: e.target.value })
-                      }
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                      placeholder="Ej: Comidas"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    URL de Imagen
-                  </label>
-                  <input
-                    type="url"
-                    value={formData.image_url}
-                    onChange={(e) =>
-                      setFormData({ ...formData, image_url: e.target.value })
-                    }
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    placeholder="https://ejemplo.com/imagen.jpg"
-                  />
-                </div>
-
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="available"
-                    checked={formData.available}
-                    onChange={(e) =>
-                      setFormData({ ...formData, available: e.target.checked })
-                    }
-                    className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
-                  />
-                  <label
-                    htmlFor="available"
-                    className="ml-2 text-sm font-medium text-gray-700"
-                  >
-                    Producto disponible
-                  </label>
-                </div>
-
-                <div className="flex items-center gap-3 pt-4">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowModal(false);
-                      setEditingProduct(null);
-                    }}
-                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    Cancelar
+              <div className="p-4">
+                <h3 className="font-bold text-lg text-gray-900 truncate">{product.name}</h3>
+                <p className="text-xs text-gray-500 mb-1">{product.store_categories?.name || 'Sin categoría'}</p>
+                <p className="text-purple-600 font-extrabold text-lg mt-1">${product.price.toLocaleString()}</p>
+                
+                {/* ZONA DE BOTONES: EDITAR Y ELIMINAR */}
+                <div className="mt-4 pt-4 border-t flex justify-end gap-2">
+                  <button onClick={() => handleDeleteProduct(product.id)} className="text-gray-400 hover:text-red-600 p-2 rounded-lg hover:bg-red-50 transition-colors" title="Eliminar producto">
+                    <Trash2 className="w-5 h-5" />
                   </button>
-                  <button
-                    type="submit"
-                    className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-                  >
-                    {editingProduct ? 'Actualizar' : 'Crear'}
+                  <button onClick={() => openModal(product)} className="text-gray-500 hover:text-purple-600 p-2 rounded-lg hover:bg-purple-50 transition-colors" title="Editar producto">
+                    <Edit2 className="w-5 h-5" />
                   </button>
                 </div>
-              </form>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* MODAL PARA CREAR / EDITAR */}
+        {showModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/70 p-4 backdrop-blur-sm">
+            <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl max-h-[90vh] flex flex-col">
+              <div className="flex justify-between p-5 border-b"><h3 className="text-xl font-bold">{formData.id ? 'Editar Producto' : 'Nuevo Producto'}</h3><button onClick={() => setShowModal(false)}><X/></button></div>
+              <div className="overflow-y-auto p-5">
+                <form id="productForm" onSubmit={handleSubmit} className="space-y-5">
+                  <div className="space-y-2">
+                    <label className="block text-sm font-semibold">Sube una Foto del Producto</label>
+                    <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed rounded-2xl h-40 flex flex-col items-center justify-center cursor-pointer relative overflow-hidden bg-gray-50 hover:bg-purple-50 transition-colors">
+                      {isUploading ? <Upload className="animate-bounce text-purple-600 w-8 h-8" /> : formData.image_url ? <img src={formData.image_url} className="w-full h-full object-cover" /> : <div className="text-gray-500 text-center flex flex-col items-center"><ImageIcon className="w-8 h-8 mb-2 opacity-50"/>Toca para subir foto</div>}
+                      <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
+                    </div>
+                  </div>
+                  <input type="text" required className="w-full px-4 py-3 rounded-xl border outline-none focus:border-purple-500" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Nombre (Ej: Perro Caliente)" />
+                  <select required className="w-full px-4 py-3 rounded-xl border bg-white outline-none focus:border-purple-500" value={formData.category_id} onChange={e => setFormData({...formData, category_id: e.target.value})}>
+                      <option value="" disabled>Selecciona una categoría</option>
+                      {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+                  </select>
+                  <textarea rows="2" className="w-full px-4 py-3 rounded-xl border outline-none focus:border-purple-500" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} placeholder="Ingredientes o descripción breve" />
+                  <div className="grid grid-cols-2 gap-4 items-center">
+                    <input type="number" required className="w-full px-4 py-3 rounded-xl border font-bold text-purple-900 outline-none focus:border-purple-500" value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} placeholder="Precio ($)" />
+                    <div className="flex items-center space-x-2 pt-6">
+                      <input type="checkbox" id="isActive" className="w-5 h-5 rounded" checked={formData.is_active} onChange={e => setFormData({...formData, is_active: e.target.checked})} />
+                      <label htmlFor="isActive" className="text-sm font-semibold">Hay Disponibilidad</label>
+                    </div>
+                  </div>
+                </form>
+              </div>
+              <div className="p-5 bg-gray-50 border-t">
+                <button type="submit" form="productForm" disabled={isUploading} className="w-full bg-purple-600 text-white font-bold py-4 rounded-xl shadow-lg active:scale-95 transition-transform">{formData.id ? 'Guardar Cambios' : 'Crear Producto'}</button>
+              </div>
             </div>
           </div>
         )}
@@ -540,4 +213,4 @@ const Products = () => {
   );
 };
 
-export default Products;
+export default StoreProducts;

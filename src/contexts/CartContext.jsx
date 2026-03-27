@@ -146,7 +146,7 @@ export const CartProvider = ({ children }) => {
                         </h3>
                         
                         <p className="text-gray-600 text-center text-sm mb-6">
-                            Tu lista actual tiene productos de otro comercio. Por logística, debes pedir de un negocio a la vez. ¿Deseas vaciar tu lista actual?
+                            Tu lista actual tiene productos de otro comercio. Por logística, debes cotizar de un negocio a la vez. ¿Deseas vaciar tu lista actual?
                         </p>
 
                         <div className="flex flex-col space-y-3">
