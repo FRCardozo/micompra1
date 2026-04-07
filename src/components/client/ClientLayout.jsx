@@ -12,17 +12,21 @@ import {
   Settings
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import useCart from '../../hooks/useCart';
+// CORRECCIÓN 1: Importamos desde el contexto correcto
+import { useCart } from '../../contexts/CartContext';
 
 const ClientLayout = ({ children }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { signOut, profile } = useAuth();
-  const { getTotalItems } = useCart();
+  
+  // CORRECCIÓN 2: Traemos el número total directamente del carrito
+  const { totalItems } = useCart();
+  
   const [searchQuery, setSearchQuery] = useState('');
   const [showUserMenu, setShowUserMenu] = useState(false);
 
-  const totalItems = getTotalItems();
+  // CORRECCIÓN 3: Eliminamos la línea const totalItems = getTotalItems(); porque ya no la necesitamos
 
   const handleSearch = (e) => {
     e.preventDefault();
