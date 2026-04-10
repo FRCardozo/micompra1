@@ -13,7 +13,6 @@ const Stores = () => {
   const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
   const [selectedCategory, setSelectedCategory] = useState(searchParams.get('category') || 'all');
 
-  // Sync state with URL params
   useEffect(() => {
     const category = searchParams.get('category') || 'all';
     const search = searchParams.get('search') || '';
@@ -27,7 +26,7 @@ const Stores = () => {
 
   useEffect(() => {
     fetchStores();
-  }, [selectedCategory, searchTerm]); // Now search is part of the fetch
+  }, [selectedCategory, searchTerm]);
 
   const fetchCategories = async () => {
     try {
@@ -48,7 +47,6 @@ const Stores = () => {
     try {
       setLoading(true);
 
-      // Basic query for active stores
       let query = supabase
         .from('stores')
         .select(`
@@ -57,9 +55,7 @@ const Stores = () => {
         `)
         .eq('status', 'active');
 
-      // Filter by category slug if not 'all'
       if (selectedCategory !== 'all') {
-        // We use a filter on the joined table
         query = query.filter('category.slug', 'eq', selectedCategory);
       }
 
@@ -68,11 +64,8 @@ const Stores = () => {
 
       let finalStores = storesData || [];
 
-      // Global Search Logic: Name, Description OR Products
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
-
-        // 1. Find stores that match directly
         const directMatchIds = finalStores
           .filter(s =>
             s.name.toLowerCase().includes(term) ||
@@ -80,7 +73,6 @@ const Stores = () => {
           )
           .map(s => s.id);
 
-        // 2. Find products that match and get their store IDs
         const { data: matchedProducts, error: prodError } = await supabase
           .from('products')
           .select('store_id')
@@ -89,16 +81,13 @@ const Stores = () => {
         if (prodError) throw prodError;
 
         const productMatchStoreIds = matchedProducts ? matchedProducts.map(p => p.store_id) : [];
-
-        // 3. Combine both and unique
         const allMatchingIds = [...new Set([...directMatchIds, ...productMatchStoreIds])];
-
-        // If we are already filtering by category, we only want stores in the category
-        // that also match the search.
         finalStores = finalStores.filter(s => allMatchingIds.includes(s.id));
       }
 
-      setStores(finalStores);
+      // Orden inteligente: Abiertas primero
+      const sorted = finalStores.sort((a, b) => Number(b.is_open_now) - Number(a.is_open_now));
+      setStores(sorted);
     } catch (error) {
       console.error('Error fetching stores:', error);
     } finally {
@@ -106,13 +95,11 @@ const Stores = () => {
     }
   };
 
-  // We already filtered during fetch
   const filteredStores = stores;
 
   const handleSearchChange = (e) => {
     const value = e.target.value;
     setSearchTerm(value);
-    // Update URL without full navigation
     const newParams = new URLSearchParams(searchParams);
     if (value) {
       newParams.set('search', value);
@@ -140,19 +127,15 @@ const Stores = () => {
   return (
     <ClientLayout>
       <div className="space-y-6">
-        {/* Header */}
         <div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Tiendas</h1>
           <p className="text-gray-600">Descubre las mejores tiendas cerca de ti</p>
         </div>
 
-        {/* Search Bar */}
         <Card padding="md">
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
+              <span className="text-gray-400">🔍</span>
             </div>
             <Input
               type="text"
@@ -164,7 +147,6 @@ const Stores = () => {
           </div>
         </Card>
 
-        {/* Category Filter */}
         <div className="overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
           <div className="flex space-x-3">
             <button
@@ -193,14 +175,12 @@ const Stores = () => {
           </div>
         </div>
 
-        {/* Results Count */}
         {!loading && (
           <div className="text-sm text-gray-600">
             {filteredStores.length} {filteredStores.length === 1 ? 'tienda encontrada' : 'tiendas encontradas'}
           </div>
         )}
 
-        {/* Stores Grid */}
         {loading ? (
           <div className="flex justify-center py-12">
             <LoadingSpinner size="lg" />
@@ -221,37 +201,29 @@ const Stores = () => {
                     <img
                       src={store.logo_url}
                       alt={store.name}
-                      className="w-full h-full object-cover"
+                      className={`w-full h-full object-cover ${!store.is_open_now ? 'grayscale opacity-60' : ''}`}
                     />
                   ) : (
                     <span className="text-7xl">🏪</span>
-                  )}
-
-                  {/* Status Badge */}
-                  {store.is_open !== false && (
-                    <div className="absolute top-3 right-3 bg-green-500 text-white text-xs font-semibold px-3 py-1 rounded-full">
-                      Abierto
-                    </div>
                   )}
                 </div>
 
                 {/* Store Info */}
                 <div className="p-4">
-                  <div className="flex items-start justify-between mb-2">
-                    <h3 className="font-bold text-gray-900 text-lg">{store.name}</h3>
-                    <div className="flex items-center space-x-1 bg-yellow-50 px-2 py-1 rounded-lg">
-                      <span className="text-yellow-500">⭐</span>
-                      <span className="font-semibold text-gray-900 text-sm">
-                        {store.rating ? store.rating.toFixed(1) : '4.5'}
-                      </span>
-                    </div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <h3 className="font-bold text-gray-900 text-lg truncate flex-1">{store.name}</h3>
+                    
+                    {/* ETIQUETA PARPADEANTE */}
+                    <span className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider shrink-0 border ${store.is_open_now ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${store.is_open_now ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
+                      {store.is_open_now ? 'Abierto' : 'Cerrado'}
+                    </span>
                   </div>
 
                   <p className="text-sm text-gray-600 mb-3 line-clamp-2">
                     {store.description || 'Descripción no disponible'}
                   </p>
 
-                  {/* Store Details */}
                   <div className="flex items-center justify-between text-sm">
                     <div className="flex items-center space-x-1 text-gray-600">
                       <span>⏱️</span>
@@ -260,20 +232,10 @@ const Stores = () => {
                     <div className="flex items-center space-x-1 text-gray-600">
                       <span>🚚</span>
                       <span className="font-medium">
-                        {store.delivery_fee === 0 ? 'Gratis' : `$${store.delivery_fee || '3.000'}`}
+                        {store.delivery_fee === 0 ? 'Gratis' : `$${store.delivery_fee?.toLocaleString() || '3.000'}`}
                       </span>
                     </div>
                   </div>
-
-                  {/* Store Address */}
-                  {store.address && (
-                    <div className="mt-3 pt-3 border-t border-gray-100">
-                      <div className="flex items-start space-x-2 text-xs text-gray-500">
-                        <span>📍</span>
-                        <span className="line-clamp-1">{store.address}</span>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </Card>
             ))}

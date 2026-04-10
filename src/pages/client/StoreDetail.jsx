@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useCartContext } from '../../contexts/CartContext';
-// IMPORTACIÓN ACTUALIZADA: Añadí 'Tag' para el ícono de la etiqueta
-import { ArrowLeft, MapPin, Plus, Minus, Info, X, Store, AlertCircle, MessageCircle, Heart, Eye, Image as ImageIcon, ShoppingCart, Share2, Tag } from 'lucide-react';
+import { ArrowLeft, MapPin, Plus, Minus, Info, X, Store, AlertCircle, MessageCircle, Heart, Eye, Image as ImageIcon, ShoppingCart, Share2, Tag, Flame } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const StoreDetail = () => {
@@ -21,17 +20,55 @@ const StoreDetail = () => {
   
   const [activeStoryIndex, setActiveStoryIndex] = useState(null); 
   const [isPaused, setIsPaused] = useState(false);
-  const [likedStories, setLikedStories] = useState(new Set());
   const [fullScreenImage, setFullScreenImage] = useState(null);
+
+  const [likedStories, setLikedStories] = useState(() => {
+    const saved = localStorage.getItem('likedStories');
+    return saved ? new Set(JSON.parse(saved)) : new Set();
+  });
 
   const [viewedStories, setViewedStories] = useState(() => {
     const saved = localStorage.getItem('viewedStories');
     return saved ? new Set(JSON.parse(saved)) : new Set();
   });
 
+  // Función separada para recargar SOLO las historias en tiempo real
+  const fetchActiveOffersOnly = async () => {
+    const { data } = await supabase
+      .from('flash_offers')
+      .select('*')
+      .eq('store_id', id)
+      .eq('is_active', true)
+      .gt('expires_at', new Date().toISOString());
+    setFlashOffers(data || []);
+  };
+
   useEffect(() => {
-    if (id) fetchStoreDetails();
-    else { setErrorMessage("No se encontró el ID de la tienda."); setLoading(false); }
+    if (id) {
+      fetchStoreDetails();
+
+      // REALTIME CORREGIDO: Sin filtro estricto para poder captar los eventos DELETE
+      const channel = supabase
+        .channel('client_store_realtime')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'flash_offers' },
+          (payload) => {
+            // Si eliminaron algo o si el nuevo cambio pertenece a esta tienda, refrescamos
+            if (payload.eventType === 'DELETE' || payload.new?.store_id === id) {
+              fetchActiveOffersOnly();
+            }
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    } else { 
+      setErrorMessage("No se encontró el ID de la tienda."); 
+      setLoading(false); 
+    }
   }, [id]);
 
   const fetchStoreDetails = async () => {
@@ -43,9 +80,9 @@ const StoreDetail = () => {
       setStore(storeData);
 
       await supabase.rpc('increment_store_views', { store_id: id });
+      await supabase.rpc('increment_daily_metric', { target_store_id: id, metric_column: 'views' });
 
-      const { data: offersData } = await supabase.from('flash_offers').select('*').eq('store_id', id).eq('is_active', true).gt('expires_at', new Date().toISOString());
-      setFlashOffers(offersData || []);
+      await fetchActiveOffersOnly();
 
       const { data: productsData } = await supabase.from('products').select('*, store_categories(name)').eq('store_id', id).eq('is_active', true);
       setProducts(productsData || []);
@@ -58,16 +95,27 @@ const StoreDetail = () => {
   };
 
   const handleLikeStory = async (offerId, e) => {
-    e.stopPropagation();
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     if (likedStories.has(offerId)) return;
-    setLikedStories(new Set([...likedStories, offerId]));
+    
+    const newLiked = new Set(likedStories).add(offerId);
+    setLikedStories(newLiked);
+    localStorage.setItem('likedStories', JSON.stringify([...newLiked]));
+
     toast.success('¡Te gustó esta oferta!', { icon: '❤️', position: 'top-center' });
     const { error } = await supabase.rpc('increment_offer_likes', { offer_id: offerId });
     if (error) console.error("Error al dar like:", error);
   };
 
-  const handleDirectWhatsApp = (item) => {
+  const handleDirectWhatsApp = async (item) => {
     if (!store?.phone) return toast.error('Esta tienda no tiene un WhatsApp registrado.');
+    
+    await supabase.rpc('increment_whatsapp_clicks', { store_id: store.id });
+    await supabase.rpc('increment_daily_metric', { target_store_id: store.id, metric_column: 'whatsapp_clicks' });
+
     const message = `Hola ${store.name}! 👋 Vi esta oferta en la app y me interesa pedir:\n\n*${item.title || item.name}* a $${item.price.toLocaleString()}`;
     const cleanPhone = store.phone.replace(/\D/g, '');
     window.open(`https://wa.me/57${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
@@ -77,10 +125,15 @@ const StoreDetail = () => {
     setActiveStoryIndex(index);
     setIsPaused(false);
     const offerId = flashOffers[index].id;
-    const newViewed = new Set(viewedStories).add(offerId);
-    setViewedStories(newViewed);
-    localStorage.setItem('viewedStories', JSON.stringify([...newViewed]));
-    await supabase.rpc('increment_offer_views', { offer_id: offerId });
+    
+    if (!viewedStories.has(offerId)) {
+      const newViewed = new Set(viewedStories).add(offerId);
+      setViewedStories(newViewed);
+      localStorage.setItem('viewedStories', JSON.stringify([...newViewed]));
+      
+      await supabase.rpc('increment_offer_views', { offer_id: offerId });
+      await supabase.rpc('increment_daily_metric', { target_store_id: id, metric_column: 'story_views' });
+    }
   };
 
   const nextStory = () => {
@@ -95,7 +148,6 @@ const StoreDetail = () => {
   const handleShare = async (title, text, customPath = '') => {
     setIsPaused(true); 
     const url = `${window.location.origin}${customPath || window.location.pathname}`;
-    
     if (navigator.share && window.isSecureContext) {
       try {
         await navigator.share({ title, text, url });
@@ -276,7 +328,7 @@ const StoreDetail = () => {
         </div>
       )}
 
-      {/* 🚀 VISOR DE HISTORIAS - DISEÑO INOVADOR "SHOPPING TAG HORIZONTAL" */}
+      {/* VISOR DE HISTORIAS */}
       {activeStoryIndex !== null && flashOffers[activeStoryIndex] && (
         <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-md flex flex-col animate-in fade-in zoom-in-95 duration-300 select-none">
           
@@ -286,7 +338,16 @@ const StoreDetail = () => {
                 <div 
                   className="h-full bg-white rounded-full" 
                   onAnimationEnd={() => { if (idx === activeStoryIndex) nextStory(); }}
-                  style={{ width: idx < activeStoryIndex ? '100%' : idx === activeStoryIndex ? '100%' : '0%', transition: idx < activeStoryIndex ? 'none' : 'width 5s linear', transformOrigin: 'left', animation: idx === activeStoryIndex ? 'shrinkWidth 5s linear forwards' : 'none', animationPlayState: isPaused ? 'paused' : 'running' }} 
+                  style={{ 
+                    width: idx < activeStoryIndex ? '100%' : idx === activeStoryIndex ? '100%' : '0%', 
+                    transition: idx < activeStoryIndex ? 'none' : 'width 5s linear', 
+                    transformOrigin: 'left', 
+                    animationName: idx === activeStoryIndex ? 'shrinkWidth' : 'none',
+                    animationDuration: '5s',
+                    animationTimingFunction: 'linear',
+                    animationFillMode: 'forwards',
+                    animationPlayState: isPaused ? 'paused' : 'running' 
+                  }} 
                 />
               </div>
             ))}
@@ -314,21 +375,24 @@ const StoreDetail = () => {
              </div>
           </div>
           
-          {/* BOTTOM BAR REDISEÑADA - HORIZONTAL, MODERNA Y COMO LA COMPETENCIA */}
-          <div className="px-4 pb-8 pt-12 bg-gradient-to-t from-black via-black/80 to-transparent absolute bottom-0 w-full flex flex-col z-20 pointer-events-auto items-center">
+          <div 
+            className="px-4 pb-8 pt-12 bg-gradient-to-t from-black via-black/80 to-transparent absolute bottom-0 w-full flex flex-col z-20 pointer-events-auto items-center"
+            onPointerDown={(e) => e.stopPropagation()} 
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="max-w-md w-full space-y-4">
-              
-              {/* 1. ETIQUETA HORIZONTAL CENTRADA (Nombre + Precio en una línea) - ¡No arropa nada! */}
-              <div className="flex justify-center w-full">
-                {/* FIX DESIGN: Ceñido, alineación horizontal y más transparente */}
+              <div className="flex flex-col items-center gap-2 w-full">
+                {flashOffers[activeStoryIndex].stock && (
+                  <span className="bg-red-500/90 backdrop-blur-md text-white text-[10px] font-bold px-3 py-1 rounded-full animate-pulse border border-red-400 shadow-[0_0_15px_rgba(239,68,68,0.6)] flex items-center gap-1">
+                    <Flame className="w-3 h-3 fill-current"/> ¡Solo quedan {flashOffers[activeStoryIndex].stock}!
+                  </span>
+                )}
+                
                 <div className="bg-gray-950/40 backdrop-blur-sm px-4 py-2.5 rounded-xl border border-white/10 shadow-lg flex items-center gap-2.5 max-w-[90%] truncate">
-                  {/* FIX ICON: 'Tag' en vez de carrito y color naranja */}
                   <Tag className="w-5 h-5 text-orange-400 shrink-0" />
-                  
-                  {/* Nombre y Precio en una sola línea horizontal */}
                   <div className="flex items-center gap-2 truncate text-white">
                     <span className="font-bold text-sm truncate">{flashOffers[activeStoryIndex].title}</span>
-                    <span className="text-gray-400 font-light">|</span> {/* Separador sutil */}
+                    <span className="text-gray-400 font-light">|</span>
                     <span className="font-black text-sm text-orange-400 shrink-0">
                       ${flashOffers[activeStoryIndex].price.toLocaleString()}
                     </span>
@@ -336,17 +400,11 @@ const StoreDetail = () => {
                 </div>
               </div>
               
-              {/* 2. FILA DE BOTONES (WhatsApp + Corazón al lado estilo WA Status) */}
               <div className="flex items-center gap-3 w-full">
-                {/* Botón WhatsApp (flex-1 para ocupar espacio) */}
-                <button 
-                  onClick={() => handleDirectWhatsApp(flashOffers[activeStoryIndex])} 
-                  className="flex-1 bg-gradient-to-r from-[#25D366] to-[#1DA851] hover:from-[#1DA851] hover:to-[#158C43] text-white font-black py-4 rounded-2xl shadow-[0_8px_20px_rgba(37,211,102,0.4)] flex justify-center items-center gap-2 active:scale-95 transition-all text-lg border border-green-400/30"
-                >
+                <button onClick={() => handleDirectWhatsApp(flashOffers[activeStoryIndex])} className="flex-1 bg-gradient-to-r from-[#25D366] to-[#1DA851] hover:from-[#1DA851] hover:to-[#158C43] text-white font-black py-4 rounded-2xl shadow-[0_8px_20px_rgba(37,211,102,0.4)] flex justify-center items-center gap-2 active:scale-95 transition-all text-lg border border-green-400/30">
                   <MessageCircle className="w-6 h-6"/> ¡PEDIR AHORA!
                 </button>
 
-                {/* El Corazón INDEPENDIENTE flotando al lado del botón verde (no arropado) */}
                 <button onClick={(e) => handleLikeStory(flashOffers[activeStoryIndex].id, e)} className="w-14 h-14 shrink-0 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center active:scale-75 transition-transform border border-white/10 shadow-lg">
                   <Heart className={`w-7 h-7 ${likedStories.has(flashOffers[activeStoryIndex].id) ? 'fill-red-500 text-red-500' : 'text-white'}`} />
                 </button>

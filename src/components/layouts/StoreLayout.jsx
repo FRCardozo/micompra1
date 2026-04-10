@@ -55,7 +55,7 @@ const StoreLayout = ({ children }) => {
   const navItems = [
     { path: '/store', icon: LayoutDashboard, label: 'Métricas & Estados' },
     { path: '/store/products', icon: ShoppingBag, label: 'Mi Catálogo' },
-    { path: '/store/orders', icon: MessageCircle, label: 'Cotizaciones (WhatsApp)' },
+    //{ path: '/store/orders', icon: MessageCircle, label: 'Cotizaciones (WhatsApp)' },
     { path: '/store/profile', icon: User, label: 'Perfil de Tienda' },
     // Ocultamos "Repartidores" temporalmente si no se usan en Fase 1, o lo dejamos si ya lo usas.
     { path: '/store/drivers', icon: Truck, label: 'Mis Repartidores' },
