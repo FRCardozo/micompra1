@@ -177,13 +177,23 @@ export const AuthProvider = ({ children }) => {
   const signOut = async () => {
     try {
       const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-      setUser(null);
-      setProfile(null);
-      toast.success('Sesión cerrada');
+      
+      // Si hay un error, PERO es porque la sesión ya no existe (403 o MissingError), 
+      // lo ignoramos porque el objetivo de cerrar sesión ya se cumplió en el servidor.
+      if (error && error.name !== 'AuthSessionMissingError' && !error.message.includes('403')) {
+        throw error;
+      }
     } catch (error) {
       console.error('[AuthContext] Sign out error:', error);
-      toast.error('Error al cerrar sesión');
+    } finally {
+      // MAGIA: Pase lo que pase con el servidor, SIEMPRE destruimos la sesión 
+      // visual en el navegador localmente.
+      setUser(null);
+      setProfile(null);
+      
+      // Limpiamos cualquier rastro extra que haya quedado en la memoria del navegador
+      localStorage.removeItem('userLocation');
+      localStorage.removeItem('returnUrl');
     }
   };
 

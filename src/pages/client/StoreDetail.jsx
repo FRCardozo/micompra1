@@ -1,17 +1,40 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/AuthContext';
 import { useCartContext } from '../../contexts/CartContext';
+import { useFavorites } from '../../hooks/useFavorites'; // <-- IMPORTAMOS LA HERRAMIENTA
 import { ArrowLeft, MapPin, Plus, Minus, Info, X, Store, AlertCircle, MessageCircle, Heart, Eye, Image as ImageIcon, ShoppingCart, Share2, Tag, Flame } from 'lucide-react';
 import toast from 'react-hot-toast';
+import AuthModal from '../../components/common/AuthModal';
 
 const StoreDetail = () => {
   const params = useParams();
   const id = params.id || params.storeId || params.store_id; 
   const navigate = useNavigate();
   
+  const { user } = useAuth(); 
   const { addToCart, getItemQuantity, updateQuantity, getTotalItems, getTotalPrice } = useCartContext();
+  const { toggleFavorite, isFavorite } = useFavorites(); // <-- ACTIVAMOS LOS FAVORITOS
   
+  const requireAuth = (callback) => {
+    if (!user) {
+      setShowAuthModal(true); // ¡AQUÍ ESTÁ LA MAGIA DEL POPUP!
+      return;
+    }
+    callback();
+  };
+
+  const getTimeRemaining = (expiresAt) => {
+    const diff = new Date(expiresAt) - new Date();
+    if (diff <= 0) return 'Expirando...';
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    if (hours > 24) return `${Math.floor(hours / 24)}d`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+  };
+
   const [store, setStore] = useState(null);
   const [products, setProducts] = useState([]);
   const [flashOffers, setFlashOffers] = useState([]);
@@ -32,14 +55,10 @@ const StoreDetail = () => {
     return saved ? new Set(JSON.parse(saved)) : new Set();
   });
 
-  // Función separada para recargar SOLO las historias en tiempo real
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
   const fetchActiveOffersOnly = async () => {
-    const { data } = await supabase
-      .from('flash_offers')
-      .select('*')
-      .eq('store_id', id)
-      .eq('is_active', true)
-      .gt('expires_at', new Date().toISOString());
+    const { data } = await supabase.from('flash_offers').select('*').eq('store_id', id).eq('is_active', true).gt('expires_at', new Date().toISOString());
     setFlashOffers(data || []);
   };
 
@@ -47,23 +66,45 @@ const StoreDetail = () => {
     if (id) {
       fetchStoreDetails();
 
-      // REALTIME CORREGIDO: Sin filtro estricto para poder captar los eventos DELETE
-      const channel = supabase
-        .channel('client_store_realtime')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'flash_offers' },
-          (payload) => {
-            // Si eliminaron algo o si el nuevo cambio pertenece a esta tienda, refrescamos
-            if (payload.eventType === 'DELETE' || payload.new?.store_id === id) {
-              fetchActiveOffersOnly();
-            }
-          }
-        )
-        .subscribe();
+      // 1. Canal para las Ofertas Flash
+      const offersChannel = supabase.channel(`client_store_offers_${id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'flash_offers' }, (payload) => {
+            if (payload.eventType === 'DELETE' || payload.new?.store_id === id) { fetchActiveOffersOnly(); }
+        }).subscribe();
 
-      return () => {
-        supabase.removeChannel(channel);
+      // 2. NUEVO Canal exclusivo para el Estado de la Tienda (Evita congelamientos)
+      const storeChannel = supabase.channel(`client_store_status_${id}`)
+        .on('postgres_changes', { 
+            event: 'UPDATE', 
+            schema: 'public', 
+            table: 'stores',
+            filter: `id=eq.${id}` // Escucha solo a esta tienda específica
+        }, (payload) => {
+            // Actualización segura preservando los productos y relaciones
+            setStore(prevStore => {
+              if (!prevStore) return prevStore;
+              
+              // Notificación visual si el estado de apertura cambió
+              if (prevStore.is_open_now !== payload.new.is_open_now) {
+                if (payload.new.is_open_now) {
+                  toast.success('¡La tienda acaba de abrir!', { icon: '🏪', position: 'top-center' });
+                } else {
+                  toast.error('La tienda acaba de cerrar.', { icon: '😴', position: 'top-center' });
+                }
+              }
+
+              return {
+                ...prevStore,
+                is_open_now: payload.new.is_open_now,
+                name: payload.new.name || prevStore.name,
+                description: payload.new.description || prevStore.description
+              };
+            });
+        }).subscribe();
+
+      return () => { 
+        supabase.removeChannel(offersChannel); 
+        supabase.removeChannel(storeChannel); 
       };
     } else { 
       setErrorMessage("No se encontró el ID de la tienda."); 
@@ -87,24 +128,15 @@ const StoreDetail = () => {
       const { data: productsData } = await supabase.from('products').select('*, store_categories(name)').eq('store_id', id).eq('is_active', true);
       setProducts(productsData || []);
 
-    } catch (error) {
-      setErrorMessage(error.message || 'Error al cargar la tienda.');
-    } finally {
-      setLoading(false); 
-    }
+    } catch (error) { setErrorMessage(error.message || 'Error al cargar la tienda.'); } finally { setLoading(false); }
   };
 
   const handleLikeStory = async (offerId, e) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
+    if (e) { e.preventDefault(); e.stopPropagation(); }
     if (likedStories.has(offerId)) return;
-    
     const newLiked = new Set(likedStories).add(offerId);
     setLikedStories(newLiked);
     localStorage.setItem('likedStories', JSON.stringify([...newLiked]));
-
     toast.success('¡Te gustó esta oferta!', { icon: '❤️', position: 'top-center' });
     const { error } = await supabase.rpc('increment_offer_likes', { offer_id: offerId });
     if (error) console.error("Error al dar like:", error);
@@ -112,10 +144,8 @@ const StoreDetail = () => {
 
   const handleDirectWhatsApp = async (item) => {
     if (!store?.phone) return toast.error('Esta tienda no tiene un WhatsApp registrado.');
-    
     await supabase.rpc('increment_whatsapp_clicks', { store_id: store.id });
     await supabase.rpc('increment_daily_metric', { target_store_id: store.id, metric_column: 'whatsapp_clicks' });
-
     const message = `Hola ${store.name}! 👋 Vi esta oferta en la app y me interesa pedir:\n\n*${item.title || item.name}* a $${item.price.toLocaleString()}`;
     const cleanPhone = store.phone.replace(/\D/g, '');
     window.open(`https://wa.me/57${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
@@ -125,12 +155,10 @@ const StoreDetail = () => {
     setActiveStoryIndex(index);
     setIsPaused(false);
     const offerId = flashOffers[index].id;
-    
     if (!viewedStories.has(offerId)) {
       const newViewed = new Set(viewedStories).add(offerId);
       setViewedStories(newViewed);
       localStorage.setItem('viewedStories', JSON.stringify([...newViewed]));
-      
       await supabase.rpc('increment_offer_views', { offer_id: offerId });
       await supabase.rpc('increment_daily_metric', { target_store_id: id, metric_column: 'story_views' });
     }
@@ -149,16 +177,9 @@ const StoreDetail = () => {
     setIsPaused(true); 
     const url = `${window.location.origin}${customPath || window.location.pathname}`;
     if (navigator.share && window.isSecureContext) {
-      try {
-        await navigator.share({ title, text, url });
-        setIsPaused(false); 
-      } catch (error) {
-        if (error.name !== 'AbortError') fallbackShare(text, url);
-        setIsPaused(false);
-      }
-    } else {
-      fallbackShare(text, url);
-    }
+      try { await navigator.share({ title, text, url }); setIsPaused(false); } 
+      catch (error) { if (error.name !== 'AbortError') fallbackShare(text, url); setIsPaused(false); }
+    } else { fallbackShare(text, url); }
   };
 
   const fallbackShare = (text, url) => {
@@ -254,6 +275,7 @@ const StoreDetail = () => {
           </div>
         )}
 
+        {/* LISTADO DE PRODUCTOS CON BOTONES DE FAVORITOS */}
         <div className="mt-8 space-y-10">
           {Object.keys(groupedProducts).length === 0 ? (
             <div className="text-center py-16 text-gray-500 font-medium bg-white rounded-3xl border border-dashed border-gray-300">
@@ -272,6 +294,15 @@ const StoreDetail = () => {
                       <div key={product.id} className={`bg-white rounded-2xl p-4 shadow-sm border flex gap-4 transition-all relative overflow-hidden group cursor-pointer ${quantityInCart > 0 ? 'border-orange-300 bg-orange-50/30 ring-1 ring-orange-200' : 'border-gray-100 hover:shadow-md hover:border-orange-200'}`}>
                         
                         <div onClick={() => product.image_url && setFullScreenImage(product.image_url)} className="w-28 h-28 rounded-xl bg-gray-100 overflow-hidden shrink-0 relative">
+                          
+                          {/* BOTÓN DE CORAZÓN SOBRE LA IMAGEN DEL PRODUCTO */}
+                          <button 
+                            onClick={(e) => toggleFavorite(product.id, e)} 
+                            className="absolute top-2 left-2 z-10 p-1.5 bg-white/80 backdrop-blur-sm rounded-full text-gray-400 hover:text-red-500 transition-colors shadow-sm opacity-100 sm:opacity-0 group-hover:opacity-100"
+                          >
+                            <Heart className={`w-4 h-4 ${isFavorite(product.id) ? 'fill-red-500 text-red-500' : ''}`} />
+                          </button>
+
                           {product.image_url ? <img src={product.image_url} className="w-full h-full object-cover transform group-hover:scale-105 transition-transform" /> : <Store className="w-8 h-8 m-auto text-gray-300 mt-10"/>}
                         </div>
 
@@ -292,10 +323,10 @@ const StoreDetail = () => {
                               <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-full px-1 py-1 shadow-sm">
                                 <button onClick={(e) => { e.stopPropagation(); updateQuantity(product.id, quantityInCart - 1); }} className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center hover:bg-gray-200 transition-colors"><Minus className="w-4 h-4"/></button>
                                 <span className="font-bold text-sm w-4 text-center">{quantityInCart}</span>
-                                <button onClick={(e) => { e.stopPropagation(); addToCart(product); }} className="w-7 h-7 rounded-full bg-orange-500 text-white flex items-center justify-center hover:bg-orange-600 transition-colors shadow-md shadow-orange-500/30"><Plus className="w-4 h-4"/></button>
+                                <button onClick={(e) => { e.stopPropagation(); requireAuth(() => addToCart(product)); }} className="w-7 h-7 rounded-full bg-orange-500 text-white flex items-center justify-center hover:bg-orange-600 transition-colors shadow-md shadow-orange-500/30"><Plus className="w-4 h-4"/></button>
                               </div>
                             ) : (
-                              <button onClick={(e) => { e.stopPropagation(); addToCart(product); }} className="w-9 h-9 rounded-full bg-gray-900 text-white flex items-center justify-center hover:bg-orange-500 transition-colors shadow-md"><Plus className="w-5 h-5"/></button>
+                              <button onClick={(e) => { e.stopPropagation(); requireAuth(() => addToCart(product)); }} className="w-9 h-9 rounded-full bg-gray-900 text-white flex items-center justify-center hover:bg-orange-500 transition-colors shadow-md"><Plus className="w-5 h-5"/></button>
                             )}
                           </div>
                         </div>
@@ -358,7 +389,12 @@ const StoreDetail = () => {
               <div className="w-11 h-11 rounded-full border-2 border-orange-500 overflow-hidden bg-gray-900 shadow-lg">{store.logo_url && <img src={store.logo_url} className="w-full h-full object-cover" />}</div>
               <div>
                 <p className="font-bold text-base shadow-sm drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]">{store.name}</p>
-                <p className="text-xs text-orange-400 font-bold drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]">Oferta Flash ⚡</p>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-xs text-orange-400 font-bold drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]">Oferta Flash ⚡</p>
+                  <span className="text-[10px] text-white/80 font-medium drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)] flex items-center gap-0.5">
+                    • ⏱️ Termina en {getTimeRemaining(flashOffers[activeStoryIndex].expires_at)}
+                  </span>
+                </div>
               </div>
             </div>
             <div className="flex items-center gap-2 pointer-events-auto">
@@ -382,7 +418,7 @@ const StoreDetail = () => {
           >
             <div className="max-w-md w-full space-y-4">
               <div className="flex flex-col items-center gap-2 w-full">
-                {flashOffers[activeStoryIndex].stock && (
+                {(flashOffers[activeStoryIndex].stock > 0 && flashOffers[activeStoryIndex].stock <= 10) && (
                   <span className="bg-red-500/90 backdrop-blur-md text-white text-[10px] font-bold px-3 py-1 rounded-full animate-pulse border border-red-400 shadow-[0_0_15px_rgba(239,68,68,0.6)] flex items-center gap-1">
                     <Flame className="w-3 h-3 fill-current"/> ¡Solo quedan {flashOffers[activeStoryIndex].stock}!
                   </span>
@@ -401,7 +437,7 @@ const StoreDetail = () => {
               </div>
               
               <div className="flex items-center gap-3 w-full">
-                <button onClick={() => handleDirectWhatsApp(flashOffers[activeStoryIndex])} className="flex-1 bg-gradient-to-r from-[#25D366] to-[#1DA851] hover:from-[#1DA851] hover:to-[#158C43] text-white font-black py-4 rounded-2xl shadow-[0_8px_20px_rgba(37,211,102,0.4)] flex justify-center items-center gap-2 active:scale-95 transition-all text-lg border border-green-400/30">
+                <button onClick={() => requireAuth(() => handleDirectWhatsApp(flashOffers[activeStoryIndex]))} className="flex-1 bg-gradient-to-r from-[#25D366] to-[#1DA851] hover:from-[#1DA851] hover:to-[#158C43] text-white font-black py-4 rounded-2xl shadow-[0_8px_20px_rgba(37,211,102,0.4)] flex justify-center items-center gap-2 active:scale-95 transition-all text-lg border border-green-400/30">
                   <MessageCircle className="w-6 h-6"/> ¡PEDIR AHORA!
                 </button>
 
@@ -415,6 +451,7 @@ const StoreDetail = () => {
           <style>{`@keyframes shrinkWidth { from { width: 0%; } to { width: 100%; } }`}</style>
         </div>
       )}
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
     </div>
   );
 };

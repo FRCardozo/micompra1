@@ -29,6 +29,17 @@ const StoreDashboard = () => {
     title: '', price: '', duration_hours: '24', image_url: '', stock: ''
   });
 
+  // Calculadora de tiempo restante
+  const getTimeRemaining = (expiresAt) => {
+    const diff = new Date(expiresAt) - new Date();
+    if (diff <= 0) return 'Expirando...';
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    if (hours > 24) return `${Math.floor(hours / 24)}d`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+  };
+
   useEffect(() => {
     if (profile?.id) {
       fetchStoreData();
@@ -149,16 +160,25 @@ const StoreDashboard = () => {
 
   const handleCreateOffer = async (e) => {
     e.preventDefault();
-    if (!offerForm.image_url || !offerForm.stock) return toast.error('Completa los campos');
+    if (!offerForm.image_url || !offerForm.title || !offerForm.price) {
+      return toast.error('Completa los campos obligatorios');
+    }
+    
     try {
       setUpdatingStatus(true);
       const expiresAt = new Date();
       expiresAt.setHours(expiresAt.getHours() + parseInt(offerForm.duration_hours));
       
       const { data, error } = await supabase.from('flash_offers').insert([{
-        store_id: store.id, title: offerForm.title, price: parseFloat(offerForm.price),
-        stock: parseInt(offerForm.stock), image_url: offerForm.image_url, 
-        expires_at: expiresAt.toISOString(), is_active: true, views_count: 0, likes_count: 0
+        store_id: store.id, 
+        title: offerForm.title, 
+        price: parseFloat(offerForm.price),
+        stock: offerForm.stock ? parseInt(offerForm.stock) : null,
+        image_url: offerForm.image_url, 
+        expires_at: expiresAt.toISOString(), 
+        is_active: true, 
+        views_count: 0, 
+        likes_count: 0
       }]).select();
 
       if (error) throw error;
@@ -175,21 +195,19 @@ const StoreDashboard = () => {
     }
   };
 
-  // NUEVO: Función para eliminar un estado
   const handleDeleteOffer = async (offerId) => {
     if (!window.confirm("¿Estás seguro de que quieres eliminar este estado?")) return;
     try {
       const { error } = await supabase.from('flash_offers').delete().eq('id', offerId);
       if (error) throw error;
       toast.success('Estado eliminado');
-      setActiveStoryIndex(null); // Cerramos el visor
-      setActiveOffers(activeOffers.filter(offer => offer.id !== offerId)); // Actualizamos lista
+      setActiveStoryIndex(null); 
+      setActiveOffers(activeOffers.filter(offer => offer.id !== offerId)); 
     } catch (error) {
       toast.error('Error al eliminar');
     }
   };
 
-  // Funciones para navegar en el visor del tendero
   const nextStory = () => {
     if (activeStoryIndex < activeOffers.length - 1) setActiveStoryIndex(activeStoryIndex + 1);
     else setActiveStoryIndex(null); 
@@ -274,7 +292,7 @@ const StoreDashboard = () => {
               💡 <strong>Visitas:</strong> Perfil abierto. <strong>Estados:</strong> Vistas en ofertas. <strong>WhatsApp:</strong> Pedidos iniciados.
             </p>
             <p className="text-[10px] text-gray-500 leading-relaxed">
-              Las métricas reinician diariamente.
+              Las métricas se reinician diariamente.
             </p>
           </div>
         </div>
@@ -289,22 +307,25 @@ const StoreDashboard = () => {
                 {isUploading ? <Upload className="animate-bounce" /> : offerForm.image_url ? <img src={offerForm.image_url} className="w-full h-full object-cover" /> : <ImageIcon className="text-gray-300 w-8 h-8"/>}
                 <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
               </div>
-              <input type="text" required placeholder="Título" className="w-full px-4 py-3 rounded-xl border bg-gray-50 outline-none font-bold" value={offerForm.title} onChange={e => setOfferForm({...offerForm, title: e.target.value})} />
+              <input type="text" required placeholder="Título (Ej. Hamburguesa Promo)" className="w-full px-4 py-3 rounded-xl border bg-gray-50 outline-none font-bold" value={offerForm.title} onChange={e => setOfferForm({...offerForm, title: e.target.value})} />
               <div className="grid grid-cols-2 gap-3">
                 <input type="number" required placeholder="Precio" className="w-full px-4 py-3 rounded-xl border bg-orange-50 text-orange-900 font-black" value={offerForm.price} onChange={e => setOfferForm({...offerForm, price: e.target.value})} />
-                <input type="number" required placeholder="Stock" className="w-full px-4 py-3 rounded-xl border bg-red-50 text-red-900 font-black" value={offerForm.stock} onChange={e => setOfferForm({...offerForm, stock: e.target.value})} />
+                
+                <input type="number" placeholder="Stock (Opcional)" className="w-full px-4 py-3 rounded-xl border bg-red-50 text-red-900 font-black placeholder:text-red-300/70" value={offerForm.stock} onChange={e => setOfferForm({...offerForm, stock: e.target.value})} />
               </div>
+              <span className="text-[9px] text-gray-500 mt-1.5 px-1 leading-tight">
+                  💡 Si pones 10 o menos stock, el cliente verá una alerta de escasez.
+              </span>
               <button type="submit" disabled={updatingStatus || isUploading} className="w-full bg-gray-900 text-white font-black py-4 rounded-xl">Publicar</button>
             </form>
           </div>
         </div>
       )}
 
-      {/* --- VISOR DE HISTORIAS AVANZADO PARA EL TENDERO --- */}
+      {/* --- VISOR DE HISTORIAS --- */}
       {activeStoryIndex !== null && activeOffers[activeStoryIndex] && (
         <div className="fixed inset-0 z-[200] bg-black/95 backdrop-blur-md flex flex-col animate-in fade-in select-none">
           
-          {/* BARRAS DE PROGRESO */}
           <div className="absolute top-2 left-2 right-2 flex gap-1 z-30">
             {activeOffers.map((_, idx) => (
               <div key={idx} className="h-1 bg-white/30 rounded-full overflow-hidden flex-1">
@@ -326,7 +347,6 @@ const StoreDashboard = () => {
             ))}
           </div>
 
-          {/* HEADER DEL VISOR (CON BOTÓN ELIMINAR) */}
           <div className="absolute top-0 w-full pt-6 pb-4 px-4 flex justify-between items-start z-30 text-white bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
             <div className="flex items-center gap-3 pointer-events-auto">
               <div className="w-10 h-10 rounded-full border border-orange-500 overflow-hidden bg-white shrink-0">
@@ -337,6 +357,8 @@ const StoreDashboard = () => {
                 <div className="flex items-center gap-2 mt-1">
                    <span className="flex items-center gap-1 text-[10px] font-bold bg-white/20 px-2 py-0.5 rounded-full backdrop-blur-sm"><Eye className="w-3 h-3"/> {activeOffers[activeStoryIndex].views_count || 0}</span>
                    <span className="flex items-center gap-1 text-[10px] font-bold bg-red-500/20 text-red-100 px-2 py-0.5 rounded-full backdrop-blur-sm"><Heart className="w-3 h-3 fill-red-500 text-red-500"/> {activeOffers[activeStoryIndex].likes_count || 0}</span>
+                   {/* EL RELOJITO PARA EL TENDERO */}
+                   <span className="flex items-center gap-1 text-[10px] font-bold bg-black/40 text-white px-2 py-0.5 rounded-full backdrop-blur-sm">⏱️ {getTimeRemaining(activeOffers[activeStoryIndex].expires_at)}</span>
                 </div>
               </div>
             </div>
@@ -350,7 +372,6 @@ const StoreDashboard = () => {
             </div>
           </div>
 
-          {/* ZONAS DE TOQUE PARA NAVEGAR (IGUAL QUE EL CLIENTE) */}
           <div className="flex-1 flex items-center justify-center relative pt-20 pb-32 px-4 w-full h-full cursor-pointer" onPointerDown={() => setIsPaused(true)} onPointerUp={() => setIsPaused(false)} onPointerLeave={() => setIsPaused(false)}>
              <div className="absolute left-0 top-0 bottom-0 w-1/3 z-10" onClick={(e) => { e.stopPropagation(); prevStory(); }} />
              <div className="absolute right-0 top-0 bottom-0 w-2/3 z-10" onClick={(e) => { e.stopPropagation(); nextStory(); }} />
@@ -362,9 +383,16 @@ const StoreDashboard = () => {
              </div>
           </div>
 
-          {/* INFORMACIÓN DEL ESTADO */}
           <div className="p-8 bg-gradient-to-t from-black via-black/60 to-transparent absolute bottom-0 w-full flex flex-col items-center pointer-events-none z-20">
-             <div className="bg-white/10 backdrop-blur-md px-6 py-3 rounded-2xl border border-white/10 flex items-center gap-3 text-white shadow-xl">
+             
+             {/* Alerta de stock dinámica para la vista previa del tendero */}
+              {(activeOffers[activeStoryIndex].stock > 0 && activeOffers[activeStoryIndex].stock <= 10) && (
+                <div className="mb-3 px-3 py-1 bg-red-500 text-white text-[10px] font-black rounded-full animate-bounce shadow-lg flex items-center gap-1.5 pointer-events-auto">
+                  <Flame className="w-3 h-3 fill-white" /> ¡SOLO QUEDAN {activeOffers[activeStoryIndex].stock}!
+                </div>
+              )}
+
+             <div className="bg-white/10 backdrop-blur-md px-6 py-3 rounded-2xl border border-white/10 flex items-center gap-3 text-white shadow-xl pointer-events-auto">
                 <Tag className="w-5 h-5 text-orange-400" />
                 <span className="font-bold">{activeOffers[activeStoryIndex].title}</span>
                 <span className="text-white/40">|</span>

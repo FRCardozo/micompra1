@@ -8,6 +8,8 @@ import { LoadingSpinner } from './components/common';
 import Login from './pages/auth/Login';
 import Signup from './pages/auth/Signup';
 
+import Favorites from './pages/client/Favorites';
+
 // Client pages
 import ClientHome from './pages/client/Home';
 import ClientStores from './pages/client/Stores';
@@ -103,6 +105,7 @@ const AppRoutes = () => {
 
   return (
     <Routes>
+      <Route path="/favorites" element={<Favorites />} />
       {/* Auth Routes */}
       <Route
         path="/auth/login"
@@ -116,31 +119,23 @@ const AppRoutes = () => {
       <Route path="/login" element={<Navigate to="/auth/login" replace />} />
       <Route path="/signup" element={<Navigate to="/auth/signup" replace />} />
 
-      {/* Client Routes */}
-      <Route
-        path="/"
+      {/* ========================================== */}
+      {/* CLIENT ROUTES (ZONA PÚBLICA / INVITADOS) */}
+      {/* ========================================== */}
+      <Route 
+        path="/" 
         element={
-          <ProtectedRoute allowedRoles={['client']}>
-            <ClientHome />
-          </ProtectedRoute>
-        }
+          user && profile && profile.role !== 'client' 
+            ? <Navigate to={getRoleHomePath(profile.role)} replace /> 
+            : <ClientHome />
+        } 
       />
-      <Route
-        path="/stores"
-        element={
-          <ProtectedRoute allowedRoles={['client']}>
-            <ClientStores />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/stores/:storeId"
-        element={
-          <ProtectedRoute allowedRoles={['client']}>
-            <ClientStoreDetail />
-          </ProtectedRoute>
-        }
-      />
+      <Route path="/stores" element={<ClientStores />} />
+      <Route path="/stores/:storeId" element={<ClientStoreDetail />} />
+
+      {/* ========================================== */}
+      {/* CLIENT ROUTES (ZONA PRIVADA) */}
+      {/* ========================================== */}
       <Route
         path="/cart"
         element={
@@ -398,14 +393,14 @@ const AppRoutes = () => {
         }
       />
 
-      {/* Catch all - redirect to role home */}
+      {/* Catch all - Si no está logueado y se pierde, lo mandamos al Home público en vez de al Login */}
       <Route
         path="*"
         element={
           user ? (
             <Navigate to={getRoleHomePath(profile?.role)} replace />
           ) : (
-            <Navigate to="/auth/login" replace />
+            <Navigate to="/" replace />
           )
         }
       />
