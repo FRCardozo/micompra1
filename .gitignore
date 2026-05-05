@@ -1,0 +1,9 @@
+node_modules/
+playwright-report/
+test-results/
+dist/
+.env
+NuevoProject-v31.zip
+.vscode/
+*.log
+npm-debug.log*
