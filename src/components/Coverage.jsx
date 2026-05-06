@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { MapPin, Plus, Edit2, Trash2, Power, PowerOff, Search, Settings, TrendingUp, Users, Store, Clock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
-import CoverageMap from './CoverageMap';
 import ZoneModal from './ZoneModal';
 import ZoneStatsModal from './ZoneStatsModal';
 
