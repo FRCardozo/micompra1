@@ -103,7 +103,7 @@ const Dashboard = () => {
 
       // Active drivers
       const { count: activeDrivers } = await supabase
-        .from('drivers')
+        .from('delivery_drivers')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'available')
         .eq('is_approved', true);
@@ -205,18 +205,20 @@ const Dashboard = () => {
     }
   };
 
-  const fetchAlerts = async () => {
+const fetchAlerts = async () => {
     try {
       const alertsList = [];
 
-      // Unassigned orders
-      const { count: unassignedOrders } = await supabase
+      // 1. Pedidos sin asignar
+      // Un pedido sin asignar es aquel que la tienda ya aceptó pero aún no tiene conductor
+      const { count: unassignedOrders, error: err1 } = await supabase
         .from('orders')
         .select('*', { count: 'exact', head: true })
-        .is('driver_id', null)
-        .in('status', ['confirmed', 'ready']);
+        .filter('driver_id', 'is', 'null')
+        .in('status', ['accepted_by_store']); // <-- ENUM CORREGIDO
 
-      if (unassignedOrders > 0) {
+      if (err1) console.error('Error pedidos sin asignar:', err1);
+      if (!err1 && unassignedOrders > 0) {
         alertsList.push({
           type: 'warning',
           message: `${unassignedOrders} pedidos sin asignar domiciliario`,
@@ -224,16 +226,18 @@ const Dashboard = () => {
         });
       }
 
-      // Delayed stores (orders in preparing for more than 30 minutes)
+      // 2. Tiendas con retrasos (más de 30 min)
+      // Un pedido retrasado en preparación es el que está 'accepted_by_store' por mucho tiempo
       const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-      const { data: delayedOrders } = await supabase
+      const { data: delayedOrders, error: err2 } = await supabase
         .from('orders')
-        .select('store_id, stores(name)')
-        .eq('status', 'preparing')
+        .select('store_id')
+        .eq('status', 'accepted_by_store') // <-- ENUM CORREGIDO
         .lt('created_at', thirtyMinutesAgo);
 
-      const delayedStores = new Set(delayedOrders?.map(o => o.stores?.name));
-      if (delayedStores.size > 0) {
+      if (err2) console.error('Error tiendas retrasadas:', err2);
+      if (!err2 && delayedOrders && delayedOrders.length > 0) {
+        const delayedStores = new Set(delayedOrders.map(o => o.store_id));
         alertsList.push({
           type: 'error',
           message: `${delayedStores.size} tiendas con retrasos en preparación`,
@@ -241,47 +245,49 @@ const Dashboard = () => {
         });
       }
 
-      // Low driver availability
-      const { count: availableDrivers } = await supabase
-        .from('drivers')
+      // 3. Baja disponibilidad de domiciliarios
+      // 'available' sí coincide con tu tabla delivery_driver_status, así que esto está bien.
+      const { count: availableDrivers, error: err3 } = await supabase
+        .from('delivery_drivers')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'available')
         .eq('is_approved', true);
 
-      if (availableDrivers < 3) {
+      if (err3) console.error('Error disponibilidad drivers:', err3);
+      if (!err3 && availableDrivers !== null && availableDrivers < 3) {
         alertsList.push({
           type: 'warning',
-          message: `Solo ${availableDrivers || 0} domiciliarios disponibles`,
+          message: `Solo ${availableDrivers} domiciliarios disponibles`,
           icon: Truck
         });
       }
 
       setAlerts(alertsList);
     } catch (error) {
-      console.error('Error fetching alerts:', error);
+      console.error('Error general en fetchAlerts:', error);
     }
   };
 
   const COLORS = ['#f97316', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6b7280'];
 
   const statusColors = {
-    pending: 'bg-yellow-100 text-yellow-800',
-    confirmed: 'bg-blue-100 text-blue-800',
-    preparing: 'bg-purple-100 text-purple-800',
-    ready: 'bg-indigo-100 text-indigo-800',
-    picked_up: 'bg-cyan-100 text-cyan-800',
-    in_transit: 'bg-orange-100 text-orange-800',
+    created: 'bg-yellow-100 text-yellow-800',
+    accepted_by_store: 'bg-blue-100 text-blue-800',
+    assigned_to_driver: 'bg-indigo-100 text-indigo-800',
+    driver_heading_to_store: 'bg-purple-100 text-purple-800',
+    picked_up: 'bg-orange-100 text-orange-800',
+    driver_heading_to_client: 'bg-cyan-100 text-cyan-800',
     delivered: 'bg-green-100 text-green-800',
     cancelled: 'bg-red-100 text-red-800'
   };
 
   const statusLabels = {
-    pending: 'Pendiente',
-    confirmed: 'Confirmado',
-    preparing: 'Preparando',
-    ready: 'Listo',
-    picked_up: 'Recogido',
-    in_transit: 'En camino',
+    created: 'Nuevo (Sin confirmar)',
+    accepted_by_store: 'En Preparación',
+    assigned_to_driver: 'Domiciliario Asignado',
+    driver_heading_to_store: 'Conductor en Camino a Tienda',
+    picked_up: 'Recogido por Domiciliario',
+    driver_heading_to_client: 'En Camino al Cliente',
     delivered: 'Entregado',
     cancelled: 'Cancelado'
   };
