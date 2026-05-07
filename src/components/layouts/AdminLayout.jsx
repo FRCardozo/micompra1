@@ -117,7 +117,7 @@ const AdminLayout = ({ children }) => {
         {
           path: '/admin/coverage',
           icon: MapPin,
-          label: 'Polígonos de Cobertura',
+          label: 'Zonas de Servicio',
         },
         {
           path: '/admin/coupons',

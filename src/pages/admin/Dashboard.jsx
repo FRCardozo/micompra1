@@ -251,7 +251,7 @@ const Dashboard = () => {
       if (availableDrivers < 3) {
         alertsList.push({
           type: 'warning',
-          message: `Solo ${availableDrivers} domiciliarios disponibles`,
+          message: `Solo ${availableDrivers || 0} domiciliarios disponibles`,
           icon: Truck
         });
       }
