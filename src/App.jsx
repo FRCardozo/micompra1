@@ -38,6 +38,7 @@ import AdminDashboard from './pages/admin/Dashboard';
 import AdminUsers from './pages/admin/Users';
 import AdminStores from './pages/admin/Stores';
 import AdminStoreManagement from './pages/admin/StoreManagement';
+import StoreRequests from './pages/admin/StoreRequests'; // <-- AQUÍ ESTÁ LA NUEVA IMPORTACIÓN
 import AdminDrivers from './pages/admin/Drivers';
 import AdminOrders from './pages/admin/Orders';
 import AdminCoupons from './pages/admin/Coupons';
@@ -283,6 +284,15 @@ const AppRoutes = () => {
         element={
           <ProtectedRoute allowedRoles={['super_admin']}>
             <AdminStores />
+          </ProtectedRoute>
+        }
+      />
+      {/* LA NUEVA RUTA DE ADUANA DE TIENDAS */}
+      <Route
+        path="/admin/store-requests"
+        element={
+          <ProtectedRoute allowedRoles={['super_admin']}>
+            <StoreRequests />
           </ProtectedRoute>
         }
       />

@@ -3,7 +3,55 @@ import StoreLayout from '../../components/layouts/StoreLayout';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'react-hot-toast';
-import { Zap, Plus, Power, X, Upload, Eye, Users, Image as ImageIcon, Trash2, MessageCircle, TrendingUp, BarChart3, Flame, Tag, Heart } from 'lucide-react';
+import { Zap, Plus, Power, X, Upload, Eye, Users, Image as ImageIcon, Trash2, MessageCircle, TrendingUp, BarChart3, Flame, Tag, Heart, Store, Clock, AlertTriangle, Send, MapPin } from 'lucide-react';
+
+// --- IMPORTACIONES DE LEAFLET PARA EL MAPA ---
+import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+
+// Arreglo para el ícono del mapa
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+// Componente para el pin arrastrable
+function DraggableMarker({ position, setPosition }) {
+  const map = useMapEvents({
+    click(e) {
+      setPosition({ lat: e.latlng.lat, lng: e.latlng.lng });
+      map.flyTo(e.latlng, map.getZoom());
+    },
+  });
+
+  return (
+    <Marker
+      draggable={true}
+      eventHandlers={{
+        dragend: (e) => {
+          const marker = e.target;
+          const pos = marker.getLatLng();
+          setPosition({ lat: pos.lat, lng: pos.lng });
+        },
+      }}
+      position={[position.lat, position.lng]}
+    />
+  );
+}
+
+// Componente para volar automáticamente al municipio elegido
+function MapUpdater({ lat, lng }) {
+  const map = useMap();
+  useEffect(() => {
+    if (lat && lng) {
+      map.flyTo([lat, lng], 15);
+    }
+  }, [lat, lng, map]);
+  return null;
+}
 
 const StoreDashboard = () => {
   const { profile } = useAuth();
@@ -15,21 +63,28 @@ const StoreDashboard = () => {
   const fileInputRef = useRef(null);
   const [activeOffers, setActiveOffers] = useState([]);
   
-  // Para el visor de historias
   const [activeStoryIndex, setActiveStoryIndex] = useState(null); 
   const [isPaused, setIsPaused] = useState(false);
   
   const [todayStats, setTodayStats] = useState({
-    views: 0,
-    story_views: 0,
-    whatsapp_clicks: 0
+    views: 0, story_views: 0, whatsapp_clicks: 0
   });
 
   const [offerForm, setOfferForm] = useState({
     title: '', price: '', duration_hours: '24', image_url: '', stock: ''
   });
 
-  // Calculadora de tiempo restante
+  // --- ESTADOS PARA EL REGISTRO DE LA TIENDA ---
+  const [zones, setZones] = useState([]);
+  const [formData, setFormData] = useState({
+    name: '', 
+    address: '', 
+    phone: '',
+    lat: 8.9167, // Default inicial
+    lng: -75.1833
+  });
+  const [submitting, setSubmitting] = useState(false);
+
   const getTimeRemaining = (expiresAt) => {
     const diff = new Date(expiresAt) - new Date();
     if (diff <= 0) return 'Expirando...';
@@ -46,10 +101,7 @@ const StoreDashboard = () => {
 
       const channel = supabase
         .channel('dashboard_realtime')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'daily_stats' },
-          (payload) => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_stats' }, (payload) => {
             const today = new Date().toISOString().split('T')[0];
             if (payload.new && payload.new.store_id === store?.id && payload.new.date === today) {
               setTodayStats({
@@ -58,58 +110,77 @@ const StoreDashboard = () => {
                 whatsapp_clicks: payload.new.whatsapp_clicks || 0
               });
             }
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'stores', filter: `owner_id=eq.${profile.id}` },
-          (payload) => {
+          })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'stores', filter: `owner_id=eq.${profile.id}` }, (payload) => {
             setStore(prev => ({ ...prev, ...payload.new }));
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'flash_offers' },
-          (payload) => {
+          })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'flash_offers' }, () => {
             if (store?.id) fetchActiveOffers(store.id);
-          }
-        )
+          })
         .subscribe();
 
-      return () => {
-        supabase.removeChannel(channel);
-      };
+      return () => { supabase.removeChannel(channel); };
     }
   }, [profile, store?.id]);
 
+  // Carga paralela de Zonas si la tienda no existe
+  const fetchZones = async () => {
+    try {
+      const { data } = await supabase.from('coverage_zones').select('*').eq('is_active', true);
+      if (data && data.length > 0) {
+        setZones(data);
+      }
+    } catch (error) {
+      console.error('Error fetching zones', error);
+    }
+  };
+
   const fetchStoreData = async () => {
     try {
-      const { data: storeData, error: storeError } = await supabase.from('stores').select('*').eq('owner_id', profile.id).single();
+      setLoading(true);
+      const { data: storeData, error: storeError } = await supabase.from('stores').select('*').eq('owner_id', profile.id).maybeSingle();
       if (storeError) throw storeError;
       setStore(storeData);
       
-      if (storeData) {
+      if (!storeData) {
+        fetchZones(); // Si es nuevo, cargamos las zonas para el formulario
+      } else if (storeData.status === 'active') { 
         fetchActiveOffers(storeData.id);
         const today = new Date().toISOString().split('T')[0];
-        const { data: stats } = await supabase
-          .from('daily_stats')
-          .select('*')
-          .eq('store_id', storeData.id)
-          .eq('date', today)
-          .single();
-
-        if (stats) {
-          setTodayStats({
-            views: stats.views || 0,
-            story_views: stats.story_views || 0,
-            whatsapp_clicks: stats.whatsapp_clicks || 0
-          });
-        }
+        const { data: stats } = await supabase.from('daily_stats').select('*').eq('store_id', storeData.id).eq('date', today).maybeSingle();
+        if (stats) setTodayStats({ views: stats.views || 0, story_views: stats.story_views || 0, whatsapp_clicks: stats.whatsapp_clicks || 0 });
       }
     } catch (error) {
       console.error('Error fetching store data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleApply = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      const { error } = await supabase
+        .from('stores')
+        .insert([{
+          owner_id: profile.id,
+          name: formData.name,
+          address: formData.address,
+          phone: formData.phone,
+          lat: formData.lat, 
+          lng: formData.lng, 
+          status: 'pending_approval' // ¡ENUM CORREGIDO!
+        }]);
+
+      if (error) throw error;
+      toast.success('¡Solicitud enviada con éxito!');
+      fetchStoreData();
+    } catch (error) {
+      console.error('Error enviando solicitud:', error);
+      toast.error('Hubo un error al enviar tu solicitud');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -160,31 +231,18 @@ const StoreDashboard = () => {
 
   const handleCreateOffer = async (e) => {
     e.preventDefault();
-    if (!offerForm.image_url || !offerForm.title || !offerForm.price) {
-      return toast.error('Completa los campos obligatorios');
-    }
-    
+    if (!offerForm.image_url || !offerForm.title || !offerForm.price) return toast.error('Completa los campos obligatorios');
     try {
       setUpdatingStatus(true);
       const expiresAt = new Date();
       expiresAt.setHours(expiresAt.getHours() + parseInt(offerForm.duration_hours));
-      
       const { data, error } = await supabase.from('flash_offers').insert([{
-        store_id: store.id, 
-        title: offerForm.title, 
-        price: parseFloat(offerForm.price),
-        stock: offerForm.stock ? parseInt(offerForm.stock) : null,
-        image_url: offerForm.image_url, 
-        expires_at: expiresAt.toISOString(), 
-        is_active: true, 
-        views_count: 0, 
-        likes_count: 0
+        store_id: store.id, title: offerForm.title, price: parseFloat(offerForm.price),
+        stock: offerForm.stock ? parseInt(offerForm.stock) : null, image_url: offerForm.image_url, 
+        expires_at: expiresAt.toISOString(), is_active: true, views_count: 0, likes_count: 0
       }]).select();
-
       if (error) throw error;
-      
       if (data) setActiveOffers(prev => [data[0], ...prev]);
-      
       toast.success('¡Estado publicado!');
       setShowOfferModal(false);
       setOfferForm({ title: '', price: '', duration_hours: '24', image_url: '', stock: '' });
@@ -212,12 +270,127 @@ const StoreDashboard = () => {
     if (activeStoryIndex < activeOffers.length - 1) setActiveStoryIndex(activeStoryIndex + 1);
     else setActiveStoryIndex(null); 
   };
-
   const prevStory = () => {
     if (activeStoryIndex > 0) setActiveStoryIndex(activeStoryIndex - 1);
   };
 
   if (loading) return <StoreLayout><div className="flex justify-center p-10"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-purple-600"></div></div></StoreLayout>;
+
+  // =========================================================================
+  // LAS PUERTAS LÓGICAS (EL GUARDIÁN)
+  // =========================================================================
+
+  if (!store) {
+    return (
+      <StoreLayout>
+        <div className="max-w-4xl mx-auto bg-white p-8 rounded-2xl shadow-sm border border-gray-200 mt-6">
+          <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center mb-6">
+            <Store className="w-8 h-8 text-indigo-600" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">¡Bienvenido a MiCompra!</h2>
+          <p className="text-gray-500 mb-6">Para comenzar a vender, necesitamos los datos de tu negocio.</p>
+          
+          <form onSubmit={handleApply} className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              
+              <div className="space-y-5">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Nombre de tu Tienda *</label>
+                  <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Ej: Ferretería El Primo" />
+                </div>
+                
+                {/* SELECTOR DE MUNICIPIO */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Municipio *</label>
+                  <select 
+                    required
+                    className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                    onChange={(e) => {
+                      const selectedZone = zones.find(z => z.id === e.target.value);
+                      if (selectedZone) {
+                        setFormData(prev => ({ 
+                          ...prev, 
+                          lat: selectedZone.center_lat, 
+                          lng: selectedZone.center_lng 
+                        }));
+                      }
+                    }}
+                  >
+                    <option value="">Selecciona donde estás ubicado...</option>
+                    {zones.map(z => (
+                      <option key={z.id} value={z.id}>{z.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Dirección Escrita *</label>
+                  <input type="text" required value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Ej: Calle 4 #12-34" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Teléfono (WhatsApp) *</label>
+                  <input type="tel" required value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Ej: 3001234567" />
+                </div>
+              </div>
+
+              {/* MAPA INTERACTIVO */}
+              <div className="flex flex-col">
+                <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-red-500"/> Ubicación en el Mapa (Opcional)
+                </label>
+                <p className="text-xs text-gray-500 mb-2">Selecciona un municipio a la izquierda y arrastra el pin a tu local.</p>
+                <div className="flex-1 bg-gray-100 rounded-xl overflow-hidden min-h-[250px] border border-gray-300 relative z-0">
+                  <MapContainer center={[formData.lat, formData.lng]} zoom={15} className="w-full h-full">
+                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                    <MapUpdater lat={formData.lat} lng={formData.lng} />
+                    <DraggableMarker 
+                      position={{ lat: formData.lat, lng: formData.lng }} 
+                      setPosition={(pos) => setFormData(prev => ({ ...prev, lat: pos.lat, lng: pos.lng }))} 
+                    />
+                  </MapContainer>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-gray-100">
+              <button type="submit" disabled={submitting} className="w-full md:w-auto md:px-12 flex justify-center items-center gap-2 bg-indigo-600 text-white font-bold py-3.5 rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50">
+                <Send className="w-5 h-5" /> {submitting ? 'Enviando Solicitud...' : 'Enviar Solicitud de Tienda'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </StoreLayout>
+    );
+  }
+
+  // --- RESTRICCIÓN DE ESTADOS SEGÚN ENUM ---
+  if (store.status === 'pending_approval') {
+    return (
+      <StoreLayout>
+        <div className="max-w-2xl mx-auto bg-orange-50 border-2 border-orange-200 p-10 rounded-3xl text-center mt-10">
+          <Clock className="w-16 h-16 text-orange-500 mx-auto mb-4 animate-pulse" />
+          <h2 className="text-2xl font-black text-orange-800 mb-2">Tu tienda está en revisión</h2>
+          <p className="text-orange-700">Hemos recibido los datos de <strong>{store.name}</strong>. Nuestro equipo verificará tu solicitud.</p>
+        </div>
+      </StoreLayout>
+    );
+  }
+
+  if (store.status === 'rejected' || store.status === 'suspended') {
+    return (
+      <StoreLayout>
+        <div className="max-w-2xl mx-auto bg-red-50 border-2 border-red-200 p-10 rounded-3xl text-center mt-10">
+          <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+          <h2 className="text-2xl font-black text-red-800 mb-2">Tienda Suspendida / Rechazada</h2>
+          <p className="text-red-700 mb-6">No pudimos aprobar o mantener activa la tienda <strong>{store.name}</strong>. Comunícate con soporte.</p>
+        </div>
+      </StoreLayout>
+    );
+  }
+
+  // =========================================================================
+  // TU DASHBOARD ORIGINAL (Solo se muestra si la tienda está 'active' o 'inactive')
+  // =========================================================================
 
   return (
     <StoreLayout>
@@ -357,7 +530,6 @@ const StoreDashboard = () => {
                 <div className="flex items-center gap-2 mt-1">
                    <span className="flex items-center gap-1 text-[10px] font-bold bg-white/20 px-2 py-0.5 rounded-full backdrop-blur-sm"><Eye className="w-3 h-3"/> {activeOffers[activeStoryIndex].views_count || 0}</span>
                    <span className="flex items-center gap-1 text-[10px] font-bold bg-red-500/20 text-red-100 px-2 py-0.5 rounded-full backdrop-blur-sm"><Heart className="w-3 h-3 fill-red-500 text-red-500"/> {activeOffers[activeStoryIndex].likes_count || 0}</span>
-                   {/* EL RELOJITO PARA EL TENDERO */}
                    <span className="flex items-center gap-1 text-[10px] font-bold bg-black/40 text-white px-2 py-0.5 rounded-full backdrop-blur-sm">⏱️ {getTimeRemaining(activeOffers[activeStoryIndex].expires_at)}</span>
                 </div>
               </div>
@@ -384,8 +556,6 @@ const StoreDashboard = () => {
           </div>
 
           <div className="p-8 bg-gradient-to-t from-black via-black/60 to-transparent absolute bottom-0 w-full flex flex-col items-center pointer-events-none z-20">
-             
-             {/* Alerta de stock dinámica para la vista previa del tendero */}
               {(activeOffers[activeStoryIndex].stock > 0 && activeOffers[activeStoryIndex].stock <= 10) && (
                 <div className="mb-3 px-3 py-1 bg-red-500 text-white text-[10px] font-black rounded-full animate-bounce shadow-lg flex items-center gap-1.5 pointer-events-auto">
                   <Flame className="w-3 h-3 fill-white" /> ¡SOLO QUEDAN {activeOffers[activeStoryIndex].stock}!
