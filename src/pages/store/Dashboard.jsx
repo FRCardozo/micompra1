@@ -80,6 +80,7 @@ const StoreDashboard = () => {
     name: '', 
     address: '', 
     phone: '',
+    city: '',
     lat: 8.9167, // Default inicial
     lng: -75.1833
   });
@@ -157,20 +158,33 @@ const StoreDashboard = () => {
     }
   };
 
-  const handleApply = async (e) => {
+const handleApply = async (e) => {
     e.preventDefault();
     setSubmitting(true);
     try {
+      const baseSlug = formData.name
+        .toLowerCase()
+        .trim()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') 
+        .replace(/\s+/g, '-')
+        .replace(/[^\w-]+/g, '')
+        .replace(/--+/g, '-');
+      
+      const uniqueSlug = `${baseSlug}-${Math.floor(Math.random() * 10000)}`;
+
       const { error } = await supabase
         .from('stores')
         .insert([{
           owner_id: profile.id,
           name: formData.name,
+          slug: uniqueSlug, 
           address: formData.address,
           phone: formData.phone,
+          city: formData.city, // <-- AGREGAMOS LA CIUDAD AQUÍ
           lat: formData.lat, 
           lng: formData.lng, 
-          status: 'pending_approval' // ¡ENUM CORREGIDO!
+          status: 'pending_approval'
         }]);
 
       if (error) throw error;
@@ -311,7 +325,8 @@ const StoreDashboard = () => {
                         setFormData(prev => ({ 
                           ...prev, 
                           lat: selectedZone.center_lat, 
-                          lng: selectedZone.center_lng 
+                          lng: selectedZone.center_lng,
+                          city: selectedZone.name
                         }));
                       }
                     }}

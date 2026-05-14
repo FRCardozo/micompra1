@@ -372,13 +372,32 @@ const ClientLayout = ({ children }) => {
         document.body
       )}
 
-      {/* MENÚ MÓVIL */}
+      {/* MENÚ MÓVIL BLINDADO CON AUTENTICACIÓN */}
       {showMobileMenu && (
         <div className="md:hidden fixed inset-0 z-[60]">
            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in" onClick={() => setShowMobileMenu(false)} />
            <div className="absolute inset-y-0 right-0 w-[80%] max-w-sm bg-white shadow-2xl z-[70] animate-in slide-in-from-right flex flex-col">
-             <div className="p-4 flex justify-end"><button onClick={() => setShowMobileMenu(false)} className="p-2 bg-gray-100 rounded-full text-gray-600 hover:bg-gray-200"><X className="w-5 h-5" /></button></div>
-             <div className="px-6 flex-1 overflow-y-auto">
+             
+             {/* Header del menú móvil */}
+             <div className="p-4 flex justify-between items-center border-b border-gray-100 bg-gray-50/50">
+               {user ? (
+                 <div className="flex items-center gap-3 px-2">
+                   <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center shadow-sm">
+                     <span className="text-white font-bold">{profile?.full_name?.charAt(0)?.toUpperCase() || '?'}</span>
+                   </div>
+                   <div>
+                     <p className="text-sm font-bold text-gray-900 line-clamp-1">{profile?.full_name || 'Usuario'}</p>
+                     <p className="text-xs text-gray-500 truncate">{user?.email || ''}</p>
+                   </div>
+                 </div>
+               ) : (
+                 <span className="font-black text-gray-900 ml-2">Menú Principal</span>
+               )}
+               <button onClick={() => setShowMobileMenu(false)} className="p-2 bg-white border border-gray-200 rounded-full text-gray-600 hover:bg-gray-50 shadow-sm"><X className="w-5 h-5" /></button>
+             </div>
+
+             {/* Links de Navegación */}
+             <div className="px-6 py-4 flex-1 overflow-y-auto">
                 <div className="space-y-1">
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 ml-2">Navegación</p>
                   {navItems.map((item) => (
@@ -388,6 +407,25 @@ const ClientLayout = ({ children }) => {
                   ))}
                 </div>
              </div>
+
+             {/* Footer del menú (Login / Logout) */}
+             <div className="p-5 border-t border-gray-100 space-y-3 bg-white">
+               {user ? (
+                 <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl font-bold text-red-600 bg-red-50 hover:bg-red-100 transition-colors border border-red-100">
+                   <span>🚪</span> Cerrar Sesión
+                 </button>
+               ) : (
+                 <>
+                   <Link to="/auth/login" onClick={() => setShowMobileMenu(false)} className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl font-bold text-white bg-gray-900 hover:bg-gray-800 transition-colors shadow-md">
+                     <LogIn className="w-5 h-5" /> Ingresar
+                   </Link>
+                   <Link to="/auth/signup" onClick={() => setShowMobileMenu(false)} className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors border border-gray-200">
+                     <UserPlus className="w-5 h-5" /> Crear Cuenta
+                   </Link>
+                 </>
+               )}
+             </div>
+
            </div>
         </div>
       )}

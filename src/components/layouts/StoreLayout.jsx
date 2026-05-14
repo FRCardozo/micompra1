@@ -26,7 +26,7 @@ const StoreLayout = ({ children }) => {
     const { data: storeData } = await supabase.from('stores')
       .select('id, name, logo_url, whatsapp_clicks, daily_views, status') 
       .eq('owner_id', profile.id)
-      .single();
+      .maybeSingle();
     
     if (storeData) {
       setStoreInfo(storeData);
